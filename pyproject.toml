@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "findata-mcp"
+version = "0.1.0"
+description = "Financial data MCP server — stocks, fundamentals, FRED economics, SEC filings, crypto"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Cortex Labs", email = "hello@findata-mcp.io" }]
+keywords = [
+  "mcp",
+  "finance",
+  "stocks",
+  "financial-data",
+  "economics",
+  "FRED",
+  "SEC",
+  "cryptocurrency",
+  "x402",
+  "micropayments",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Office/Business :: Financial",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "fastmcp>=3.0.0",
+  "yfinance>=0.2.36",
+  "fredapi>=0.5.2",
+  "requests>=2.31.0",
+  "fastapi>=0.115.0",
+  "uvicorn>=0.34.0",
+  "httpx>=0.27.0",
+]
+
+[project.urls]
+Homepage = "https://findata-mcp.io"
+Repository = "https://github.com/cortex-labs/findata-mcp"
+Documentation = "https://findata-mcp.io/docs"
+"Bug Tracker" = "https://github.com/cortex-labs/findata-mcp/issues"
+
+[project.scripts]
+findata-mcp = "findata_mcp:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["findata_mcp"]
+
+# Bundle all runtime source files into the package so `uvx findata-mcp` works
+[tool.hatch.build.targets.wheel.force-include]
+"server.py"   = "findata_mcp/server.py"
+"cache.py"    = "findata_mcp/cache.py"
+"auth.py"     = "findata_mcp/auth.py"
+"metering.py" = "findata_mcp/metering.py"
+"tools"       = "findata_mcp/tools"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "findata_mcp/",
+  "server.py",
+  "cache.py",
+  "auth.py",
+  "metering.py",
+  "tools/",
+  "requirements.txt",
+  "README.md",
+  "pyproject.toml",
+]
