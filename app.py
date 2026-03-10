@@ -1,8 +1,7 @@
-"""FinData MCP — HTTP API server with x402 payments and API key auth.
+"""FinData MCP — HTTP API server with x402 micropayments.
 
-Dual authentication:
-  1. x402 micropayments: $0.01 USDC per call (agents pay per-call, zero signup)
-  2. API keys: free tier (100/day), pro ($29/mo, 10K/day), enterprise ($199/mo, 100K/day)
+All tool endpoints require x402 payment at $0.01 USDC per call.
+No API keys, no subscription tiers — just pay-per-call.
 
 Run: uvicorn app:app --host 0.0.0.0 --port 8080
 """
@@ -11,12 +10,10 @@ import os
 import time
 import logging
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
-from auth import init_db, validate_key, check_rate_limit, register_key, TIERS
 from metering import init_metering_db, log_call
 from cache import TTLCache
 from tools.stock_quote import get_stock_quote
@@ -39,7 +36,7 @@ X402_FACILITATOR = os.environ.get(
 X402_PRICE = "$0.01"
 X402_VERIFY = os.environ.get("X402_VERIFY", "false").lower() == "true"
 
-# Routes that require payment/auth
+# Routes that require payment
 PAID_PREFIXES = ("/api/v1/stock_quote", "/api/v1/company_fundamentals",
                  "/api/v1/economic_indicator", "/api/v1/sec_filing",
                  "/api/v1/crypto_price")
@@ -55,7 +52,6 @@ crypto_cache = TTLCache(ttl_seconds=60)
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    init_db()
     init_metering_db()
     logger.info("FinData MCP started — x402 network=%s, verify=%s", X402_NETWORK, X402_VERIFY)
     yield
@@ -63,13 +59,13 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(
     title="FinData MCP",
-    version="0.1.0",
-    description="Financial data API with x402 micropayments and API key authentication.",
+    version="0.2.0",
+    description="Financial data API with x402 micropayments. $0.01 per call.",
     lifespan=lifespan,
 )
 
 
-# ── Middleware: auth + metering ──
+# ── Middleware: x402 auth + metering ──
 
 def _extract_tool_name(path: str) -> str:
     """Extract tool name from API path like /api/v1/stock_quote."""
@@ -87,7 +83,7 @@ def _build_402_response(path: str) -> JSONResponse:
         status_code=402,
         content={
             "error": "Payment Required",
-            "message": "This endpoint requires payment via x402 or a valid API key.",
+            "message": "This endpoint requires payment via x402 protocol ($0.01 per call).",
             "x402": {
                 "version": "2",
                 "accepts": [
@@ -102,17 +98,6 @@ def _build_402_response(path: str) -> JSONResponse:
                 ],
                 "facilitator": X402_FACILITATOR,
             },
-            "api_key": {
-                "header": "X-API-Key",
-                "register": "POST /api/v1/register?email=you@example.com",
-                "tiers": {
-                    tier: {
-                        "daily_limit": info["daily_limit"],
-                        "price": f"${info['price_monthly']}/mo" if info["price_monthly"] else "free",
-                    }
-                    for tier, info in TIERS.items()
-                },
-            },
         },
         headers={"X-Payment-Required": "x402"},
     )
@@ -120,7 +105,7 @@ def _build_402_response(path: str) -> JSONResponse:
 
 @app.middleware("http")
 async def auth_and_metering(request: Request, call_next):
-    """Dual auth middleware: checks x402 payment OR API key. Meters all calls."""
+    """x402 payment middleware. Meters all calls."""
     path = request.url.path
     start = time.monotonic()
     client_ip = request.client.host if request.client else None
@@ -130,35 +115,9 @@ async def auth_and_metering(request: Request, call_next):
         return await call_next(request)
 
     tool_name = _extract_tool_name(path)
-    payment_method = None
-    api_key_val = None
 
-    # 1. Check API key
-    api_key_val = request.headers.get("X-API-Key")
-    if api_key_val:
-        allowed, key_info = check_rate_limit(api_key_val)
-        if key_info is None:
-            log_call(tool_name, "api_key:invalid", api_key=api_key_val,
-                     status_code=401, client_ip=client_ip)
-            return JSONResponse(status_code=401, content={"error": "Invalid API key"})
-        if not allowed:
-            log_call(tool_name, f"api_key:{key_info['tier']}", api_key=api_key_val,
-                     status_code=429, client_ip=client_ip)
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "error": "Rate limit exceeded",
-                    "tier": key_info["tier"],
-                    "daily_limit": key_info["daily_limit"],
-                    "calls_today": key_info["calls_today"],
-                    "reset_at": key_info["reset_at"],
-                    "upgrade": "Contact us for pro/enterprise tiers.",
-                },
-            )
-        payment_method = f"api_key:{key_info['tier']}"
-
-    # 2. Check x402 payment
-    elif request.headers.get("X-PAYMENT"):
+    # Check x402 payment
+    if request.headers.get("X-PAYMENT"):
         payment_method = "x402"
         if X402_VERIFY:
             try:
@@ -185,9 +144,8 @@ async def auth_and_metering(request: Request, call_next):
                     status_code=500,
                     content={"error": "Payment verification service unavailable"},
                 )
-
-    # 3. No auth — return 402
     else:
+        # No payment — return 402
         log_call(tool_name, "none", status_code=402, client_ip=client_ip)
         return _build_402_response(path)
 
@@ -198,7 +156,6 @@ async def auth_and_metering(request: Request, call_next):
     log_call(
         tool_name=tool_name,
         payment_method=payment_method,
-        api_key=api_key_val,
         response_time_ms=elapsed_ms,
         status_code=response.status_code,
         client_ip=client_ip,
@@ -212,16 +169,15 @@ async def auth_and_metering(request: Request, call_next):
 def root():
     return {
         "service": "FinData MCP",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "tools": [
             "stock_quote", "company_fundamentals", "economic_indicator",
             "sec_filing", "crypto_price",
         ],
         "pricing": {
-            "x402": "$0.01 USDC per call (zero signup)",
-            "api_key_free": "100 calls/day (register at POST /api/v1/register)",
-            "api_key_pro": "$29/mo — 10,000 calls/day",
-            "api_key_enterprise": "$199/mo — 100,000 calls/day",
+            "method": "x402 micropayments",
+            "price": "$0.01 USDC per call",
+            "signup_required": False,
         },
         "docs": "/docs",
     }
@@ -230,18 +186,6 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-@app.post("/api/v1/register")
-def api_register(email: str = Query(..., description="Your email address"),
-                 tier: str = Query("free", description="Tier: free, pro, enterprise")):
-    """Register for an API key. Free tier: 100 calls/day, no payment required."""
-    try:
-        result = register_key(email=email, tier=tier)
-        result["message"] = "Store this key securely — it will not be shown again."
-        return result
-    except ValueError as e:
-        return JSONResponse(status_code=400, content={"error": str(e)})
 
 
 @app.get("/api/v1/stats")

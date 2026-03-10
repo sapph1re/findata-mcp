@@ -8,30 +8,23 @@ startCommand:
   type: stdio
   configSchema:
     type: object
-    properties:
-      apiKey:
-        type: string
-        title: FinData API Key
-        description: |
-          Optional API key for higher rate limits (100 calls/day free tier).
-          Get one at https://findata-mcp.io/keys
-          Without a key, x402 micropayments are used automatically ($0.01/call).
+    properties: {}
     required: []
   commandFunction: |-
     (config) => ({
       command: "uvx",
       args: ["findata-mcp"],
-      env: config.apiKey ? { FINDATA_API_KEY: config.apiKey } : {}
+      env: {}
     })
 
 # ── Metadata ─────────────────────────────────────────────────────────────────
 name: findata-mcp
-version: "0.1.0"
+version: "0.2.0"
 description: |
   The first comprehensive financial data MCP. Five tools covering real-time
   stocks, company fundamentals, economic indicators, SEC filings, and crypto —
-  all in one server. Pay per call via x402 micropayments or use an API key.
-  No signup required to start.
+  all in one server. Pay per call via x402 micropayments ($0.01/call).
+  No signup required.
 
 author: Cortex
 homepage: https://findata-mcp.io
@@ -128,15 +121,6 @@ pricing:
     - name: Pay-per-call (x402)
       description: No signup. Any agent can pay automatically via x402 protocol.
       price: "$0.01 per call"
-    - name: Free API Key
-      description: 100 calls/day with API key registration.
-      price: "$0.00"
-    - name: Pro API Key
-      description: 10,000 calls/day, priority routing, SLA.
-      price: "$29.00/month"
-    - name: Enterprise API Key
-      description: 100,000 calls/day, dedicated support.
-      price: "$199.00/month"
 
 # ── Installation ─────────────────────────────────────────────────────────────
 # smithery install findata-mcp

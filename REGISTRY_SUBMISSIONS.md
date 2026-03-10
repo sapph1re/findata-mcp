@@ -73,7 +73,7 @@ docker run -d -p 8080:8080 findata-mcp
 ### Smithery-specific copy (use in submission form)
 
 **Short description** (140 chars):
-> Real-time stocks, fundamentals, FRED economics, SEC filings & crypto in one MCP. Pay-per-call via x402 or free API key. No signup required.
+> Real-time stocks, fundamentals, FRED economics, SEC filings & crypto in one MCP. $0.01/call via x402 micropayments. No signup required.
 
 **Category**: Finance
 
@@ -103,7 +103,7 @@ docker run -d -p 8080:8080 findata-mcp
 ### Glama-specific copy
 
 **Short description**:
-> First comprehensive financial data MCP — stocks, fundamentals, FRED economics, SEC filings, crypto. x402 pay-per-call or free API key.
+> First comprehensive financial data MCP — stocks, fundamentals, FRED economics, SEC filings, crypto. $0.01/call via x402 micropayments.
 
 **Category**: Finance > Market Data
 
@@ -143,11 +143,9 @@ docker run -d -p 8080:8080 findata-mcp
 > - `sec_filing(ticker, form_type)` — Full text of 10-K, 10-Q, 8-K from SEC EDGAR
 > - `crypto_price(coin_id)` — Price, market cap, volume, 7-day sparkline via CoinGecko
 >
-> **Payment options:**
+> **Payment:**
 > - x402 micropayments: $0.01/call, works automatically with any x402-compatible agent
-> - Free API key: 100 calls/day (register at findata-mcp.io/keys)
-> - Pro: 10,000 calls/day at $29/month
-> - Enterprise: 100,000 calls/day at $199/month
+> - No signup, no API keys — just pay per call
 >
 > All tools return structured JSON. Intelligent TTL caching (1min stocks, 1hr fundamentals, 6hr economics, 24hr SEC filings). Graceful rate limit handling.
 
@@ -161,7 +159,7 @@ docker run -d -p 8080:8080 findata-mcp
 
 **Tags**: stocks, financial-data, economics, SEC, crypto, x402, micropayments
 
-**Pricing**: Freemium / Pay-per-use
+**Pricing**: Pay-per-use ($0.01/call via x402)
 
 ---
 

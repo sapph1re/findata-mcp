@@ -1,6 +1,6 @@
 """Metering and call logging for FinData MCP.
 
-Logs every API call with: timestamp, tool_name, payment_method, api_key,
+Logs every API call with: timestamp, tool_name, payment_method,
 response_time_ms, status_code, client_ip.
 """
 
@@ -27,7 +27,6 @@ def init_metering_db() -> None:
             timestamp TEXT NOT NULL,
             tool_name TEXT NOT NULL,
             payment_method TEXT NOT NULL,
-            api_key TEXT,
             response_time_ms REAL,
             status_code INTEGER DEFAULT 200,
             client_ip TEXT
@@ -40,7 +39,6 @@ def init_metering_db() -> None:
 def log_call(
     tool_name: str,
     payment_method: str,
-    api_key: str | None = None,
     response_time_ms: float | None = None,
     status_code: int = 200,
     client_ip: str | None = None,
@@ -48,13 +46,12 @@ def log_call(
     """Log a single API call to the metering table."""
     conn = _get_db()
     conn.execute(
-        "INSERT INTO metering (timestamp, tool_name, payment_method, api_key, "
-        "response_time_ms, status_code, client_ip) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO metering (timestamp, tool_name, payment_method, "
+        "response_time_ms, status_code, client_ip) VALUES (?, ?, ?, ?, ?, ?)",
         (
             datetime.now(timezone.utc).isoformat(),
             tool_name,
             payment_method,
-            api_key,
             response_time_ms,
             status_code,
             client_ip,
