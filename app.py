@@ -9,6 +9,8 @@ Run: uvicorn app:app --host 0.0.0.0 --port 8080
 import os
 import time
 import logging
+import base64
+import json as _json
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query, Request
@@ -109,10 +111,12 @@ def _build_402_response(path: str) -> JSONResponse:
         ),
         error="Payment required",
     )
+    body = payment_required.model_dump(by_alias=True, exclude_none=True)
+    encoded = base64.b64encode(_json.dumps(body).encode()).decode()
     return JSONResponse(
         status_code=402,
-        content=payment_required.model_dump(by_alias=True, exclude_none=True),
-        headers={"X-Payment-Required": "x402"},
+        content=body,
+        headers={"PAYMENT-REQUIRED": encoded},
     )
 
 
