@@ -116,7 +116,7 @@ class TestAPIMiddleware(unittest.TestCase):
         accepts = data["accepts"]
         self.assertEqual(len(accepts), 1)
         self.assertEqual(accepts[0]["scheme"], "exact")
-        self.assertEqual(accepts[0]["amount"], "10000")
+        self.assertEqual(accepts[0]["maxAmountRequired"], "10000")
         self.assertIn("asset", accepts[0])
         self.assertIn("payTo", accepts[0])
         self.assertIn("maxTimeoutSeconds", accepts[0])

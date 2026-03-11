@@ -171,6 +171,10 @@ def _payment_required_header(path: str) -> str:
         error="Payment required",
     )
     body = payment_required.model_dump(by_alias=True, exclude_none=True)
+    # x402 JS SDK expects "maxAmountRequired" but Python SDK serializes as "amount"
+    for entry in body.get("accepts", []):
+        if "amount" in entry:
+            entry["maxAmountRequired"] = entry.pop("amount")
     return base64.b64encode(_json.dumps(body).encode()).decode()
 
 
@@ -198,6 +202,10 @@ def _build_402_response(path: str) -> JSONResponse:
         error="Payment required",
     )
     body = payment_required.model_dump(by_alias=True, exclude_none=True)
+    # x402 JS SDK expects "maxAmountRequired" but Python SDK serializes as "amount"
+    for entry in body.get("accepts", []):
+        if "amount" in entry:
+            entry["maxAmountRequired"] = entry.pop("amount")
     encoded = base64.b64encode(_json.dumps(body).encode()).decode()
     return JSONResponse(
         status_code=402,
