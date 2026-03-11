@@ -317,12 +317,28 @@ async def auth_and_metering(request: Request, call_next):
         payment_method = "x402"
 
         # Replay protection FIRST — always runs regardless of X402_VERIFY.
-        # Hash the raw header so even unverified payments can't be replayed.
+        # Two layers: (1) SHA-256 of raw header bytes, (2) EIP-3009 authorization
+        # nonce extracted from the payload. Layer 2 catches replays even when the
+        # same authorization is re-encoded with different JSON formatting.
         import hashlib
         sig_hash = hashlib.sha256(payment_header.encode()).hexdigest()
 
+        # Extract EIP-3009 nonce for content-based dedup (best-effort).
+        eip3009_nonce_key = None
+        try:
+            _raw_replay = base64.b64decode(payment_header) if not payment_header.strip().startswith("{") else payment_header.encode()
+            _rdata = _json.loads(_raw_replay)
+            _payload_data = _rdata.get("payload", {})
+            _auth_data = _payload_data.get("authorization", {})
+            _eip_from = _auth_data.get("from", _auth_data.get("from_address", ""))
+            _eip_nonce = _auth_data.get("nonce", "")
+            if _eip_from and _eip_nonce:
+                eip3009_nonce_key = f"eip3009:{_eip_from.lower()}:{_eip_nonce}"
+        except Exception:
+            pass  # Payload parsing is best-effort; hash-based check is the primary guard
+
         # Fast-path: in-memory check (per-worker, no I/O)
-        if sig_hash in _USED_SIGS_MEM:
+        if sig_hash in _USED_SIGS_MEM or (eip3009_nonce_key and eip3009_nonce_key in _USED_SIGS_MEM):
             logger.warning("x402 replay rejected (mem): sig_hash=%s", sig_hash[:16])
             log_call(tool_name, "x402:replay", status_code=402, client_ip=client_ip)
             return JSONResponse(
@@ -332,11 +348,10 @@ async def auth_and_metering(request: Request, call_next):
             )
 
         # Atomic claim in SQLite — INSERT OR IGNORE + rowcount.
-        # With --workers 2, two workers racing on the same signature will have
-        # exactly one succeed (rowcount=1) and the other get rowcount=0.
         # Claim happens BEFORE verification to eliminate the TOCTOU gap.
+        # 24-hour expiry: EIP-3009 authorizations can be valid for hours.
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-        expires_at = (_dt.now(_tz.utc) + _td(minutes=10)).isoformat()
+        expires_at = (_dt.now(_tz.utc) + _td(hours=24)).isoformat()
         if not try_claim_signature(sig_hash, expires_at):
             logger.warning("x402 replay rejected (db): sig_hash=%s", sig_hash[:16])
             log_call(tool_name, "x402:replay", status_code=402, client_ip=client_ip)
@@ -345,9 +360,14 @@ async def auth_and_metering(request: Request, call_next):
                 content={"error": "Payment signature already used (replay rejected)"},
                 headers={"Cache-Control": "no-store", "PAYMENT-REQUIRED": _payment_required_header(path)},
             )
+        # Also claim the EIP-3009 nonce key if extracted (catches re-encoded replays)
+        if eip3009_nonce_key:
+            try_claim_signature(eip3009_nonce_key, expires_at)
 
         # Signature claimed — record in memory for fast-path on this worker
         _USED_SIGS_MEM[sig_hash] = time.monotonic()
+        if eip3009_nonce_key:
+            _USED_SIGS_MEM[eip3009_nonce_key] = time.monotonic()
         if len(_USED_SIGS_MEM) > _USED_SIGS_MEM_MAX:
             oldest = next(iter(_USED_SIGS_MEM))
             del _USED_SIGS_MEM[oldest]
@@ -378,6 +398,11 @@ async def auth_and_metering(request: Request, call_next):
             # On-chain settlement: verify + submit transferWithAuthorization.
             # Serialized via _settlement_lock so two rapid requests don't race
             # on the facilitator nonce (Base blocks are ~2s).
+            # Retries up to 3 times with exponential backoff for transient nonce
+            # errors ("nonce too low", "replacement transaction underpriced")
+            # that occur when the previous tx hasn't been mined yet.
+            _NONCE_ERROR_PATTERNS = ("nonce too low", "replacement transaction underpriced", "already known")
+            _MAX_SETTLE_RETRIES = 3
             try:
                 from x402.schemas import PaymentRequirements
                 from x402.schemas.helpers import parse_payment_payload
@@ -394,20 +419,38 @@ async def auth_and_metering(request: Request, call_next):
                     extra={"name": X402_TOKEN_NAME, "version": X402_TOKEN_VERSION},
                 )
 
-                async with _settlement_lock:
-                    settle_result = await asyncio.to_thread(
-                        _settle_scheme.settle, pay_payload, pay_requirements
-                    )
+                last_error_reason = ""
+                for _attempt in range(_MAX_SETTLE_RETRIES):
+                    async with _settlement_lock:
+                        settle_result = await asyncio.to_thread(
+                            _settle_scheme.settle, pay_payload, pay_requirements
+                        )
+                        if settle_result.success:
+                            # Hold the lock an extra 2s so the next request's
+                            # nonce query sees the mined tx.
+                            await asyncio.sleep(2)
+                            break
+                        # Check if the failure is a transient nonce error worth retrying
+                        reason = settle_result.error_reason or ""
+                        msg = settle_result.error_message or ""
+                        combined = f"{reason} {msg}".lower()
+                        last_error_reason = reason or "unknown"
+                        if any(pat in combined for pat in _NONCE_ERROR_PATTERNS):
+                            logger.warning("x402 settlement nonce error (attempt %d/%d): %s (%s)",
+                                           _attempt + 1, _MAX_SETTLE_RETRIES, reason, msg)
+                            if _attempt < _MAX_SETTLE_RETRIES - 1:
+                                await asyncio.sleep(2 ** (_attempt + 1))  # 2s, 4s backoff
+                                continue
+                        # Non-nonce failure or final retry exhausted
+                        break
 
                 if not settle_result.success:
-                    reason = settle_result.error_reason or "unknown"
-                    msg = settle_result.error_message or ""
-                    logger.warning("x402 settlement failed: %s (%s)", reason, msg)
+                    logger.warning("x402 settlement failed: %s", last_error_reason)
                     log_call(tool_name, "x402:failed", status_code=402, client_ip=client_ip)
                     # Sanitize: never expose raw RPC/node error details to clients
                     return JSONResponse(
                         status_code=402,
-                        content={"error": f"Payment settlement failed: {reason}"},
+                        content={"error": "Payment settlement failed: please retry with a new payment"},
                         headers={"Cache-Control": "no-store", "PAYMENT-REQUIRED": _payment_required_header(path)},
                     )
                 payer = settle_result.payer or "unknown"
