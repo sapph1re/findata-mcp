@@ -5,6 +5,8 @@ import time
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 FRED_BASE_URL = "https://api.stlouisfed.org/fred"
@@ -42,6 +44,22 @@ INDICATOR_ALIASES: dict[str, str] = {
 }
 
 
+def _fred_session() -> requests.Session:
+    """Create a requests session with retry logic for transient FRED failures."""
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        backoff_factor=0.5,  # 0s, 0.5s, 1s between retries
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=["GET"],
+    )
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    return session
+
+
+_session = _fred_session()
+
+
 def resolve_series_id(raw: str) -> str:
     """Resolve a friendly alias to a FRED series ID, or pass through."""
     normalized = raw.strip().upper()
@@ -57,8 +75,8 @@ def get_economic_indicator(series_id: str) -> dict[str, Any]:
         }
 
     try:
-        # Get series metadata
-        meta_resp = requests.get(
+        # Get series metadata (retries on 5xx via session adapter)
+        meta_resp = _session.get(
             f"{FRED_BASE_URL}/series",
             params={
                 "series_id": series_id,
@@ -75,8 +93,8 @@ def get_economic_indicator(series_id: str) -> dict[str, Any]:
 
         series_meta = meta["seriess"][0]
 
-        # Get latest observations (last 12)
-        obs_resp = requests.get(
+        # Get latest observations (last 12, retries on 5xx)
+        obs_resp = _session.get(
             f"{FRED_BASE_URL}/series/observations",
             params={
                 "series_id": series_id,
@@ -121,5 +139,10 @@ def get_economic_indicator(series_id: str) -> dict[str, Any]:
                 "series_id": series_id,
             }
         return {"error": f"FRED API error: {str(e)}", "series_id": series_id}
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+        return {
+            "error": "FRED API temporarily unavailable (retries exhausted). Try again shortly.",
+            "series_id": series_id,
+        }
     except Exception as e:
         return {"error": str(e), "series_id": series_id}

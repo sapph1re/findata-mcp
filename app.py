@@ -77,6 +77,8 @@ def _error_response(result: dict) -> JSONResponse | None:
         return JSONResponse(status_code=429, content=result)
     if "not set" in err or "api_key" in err:
         return JSONResponse(status_code=503, content=result)
+    if "temporarily unavailable" in err:
+        return JSONResponse(status_code=503, content=result)
     return JSONResponse(status_code=502, content=result)
 
 
@@ -369,9 +371,11 @@ async def auth_and_metering(request: Request, call_next):
     # Must include 'success', 'transaction', and 'network' fields for SettleResponse
     # compatibility with the x402 Python SDK's get_payment_settle_response().
     if 200 <= response.status_code < 300:
+        verification_mode = "local-eip712" if X402_VERIFY else "none"
         settlement = {
             "success": True,
             "transaction": sig_hash,
+            "transactionType": "receipt" if verification_mode == "local-eip712" else "none",
             "network": X402_NETWORK,
             "x402Version": 2,
             "scheme": "exact",
@@ -379,7 +383,7 @@ async def auth_and_metering(request: Request, call_next):
             "amount": X402_AMOUNT,
             "payTo": X402_WALLET,
             "payer": payer,
-            "verification": "local-eip712" if X402_VERIFY else "none",
+            "verification": verification_mode,
         }
         encoded = base64.b64encode(_json.dumps(settlement).encode()).decode()
         new_headers["PAYMENT-RESPONSE"] = encoded
