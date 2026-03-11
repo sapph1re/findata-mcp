@@ -33,11 +33,6 @@ X402_WALLET = os.environ.get(
     "X402_WALLET_ADDRESS", "0x0000000000000000000000000000000000000000"
 )
 X402_NETWORK = os.environ.get("X402_NETWORK", "eip155:8453")  # Base mainnet
-# Note: x402.org facilitator does not support Base mainnet "exact" scheme as of 2026-03.
-# When enabling verification, use a CDP facilitator or self-hosted one.
-X402_FACILITATOR = os.environ.get(
-    "X402_FACILITATOR_URL", "https://x402.org/facilitator"
-)
 # USDC contract address (Base mainnet default)
 X402_ASSET = os.environ.get(
     "X402_ASSET_ADDRESS", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
@@ -47,6 +42,32 @@ X402_VERIFY = os.environ.get("X402_VERIFY", "true").lower() == "true"
 # EIP-712 domain params for USDC on Base mainnet
 X402_TOKEN_NAME = os.environ.get("X402_TOKEN_NAME", "USD Coin")
 X402_TOKEN_VERSION = os.environ.get("X402_TOKEN_VERSION", "2")
+
+# ── On-chain settlement via x402 SDK ──
+# When FINDATA_X402_PRIVATE_KEY and BASE_MAINNET_RPC are set, the server acts as
+# its own facilitator: it submits transferWithAuthorization on-chain after verifying
+# the EIP-3009 signature, then returns the real tx hash in PAYMENT-RESPONSE.
+_X402_PRIVATE_KEY = os.environ.get("FINDATA_X402_PRIVATE_KEY", "")
+_X402_RPC_URL = os.environ.get("BASE_MAINNET_RPC", "")
+_settle_scheme = None  # Initialized at startup if credentials are available
+
+def _init_settlement():
+    """Initialize on-chain settlement if private key + RPC are available."""
+    global _settle_scheme
+    if not _X402_PRIVATE_KEY or not _X402_RPC_URL:
+        logger.warning("On-chain settlement disabled: FINDATA_X402_PRIVATE_KEY or BASE_MAINNET_RPC not set")
+        return
+    try:
+        from x402.mechanisms.evm.signers import FacilitatorWeb3Signer
+        from x402.mechanisms.evm.exact.facilitator import ExactEvmScheme
+        signer = FacilitatorWeb3Signer(
+            private_key=_X402_PRIVATE_KEY,
+            rpc_url=_X402_RPC_URL,
+        )
+        _settle_scheme = ExactEvmScheme(signer)
+        logger.info("On-chain settlement enabled via FacilitatorWeb3Signer (address=%s)", signer.address)
+    except Exception as e:
+        logger.error("Failed to initialize on-chain settlement: %s", e)
 
 # Routes that require payment
 PAID_PREFIXES = ("/api/v1/stock_quote", "/api/v1/company_fundamentals",
@@ -88,7 +109,9 @@ def _error_response(result: dict) -> JSONResponse | None:
 async def lifespan(application: FastAPI):
     init_metering_db()
     purge_expired_signatures()
-    logger.info("FinData MCP started — x402 network=%s, verify=%s", X402_NETWORK, X402_VERIFY)
+    _init_settlement()
+    settle_mode = "on-chain" if _settle_scheme else ("local-eip712" if X402_VERIFY else "none")
+    logger.info("FinData MCP started — x402 network=%s, settle=%s", X402_NETWORK, settle_mode)
     yield
 
 
@@ -329,7 +352,48 @@ async def auth_and_metering(request: Request, call_next):
             pass  # Parsing failures will be caught by _verify_payment_locally if verify is on
 
         payer = "unverified"
-        if X402_VERIFY:
+        settle_result = None  # Will hold SettleResponse if on-chain settlement succeeds
+
+        if _settle_scheme:
+            # On-chain settlement: verify + submit transferWithAuthorization
+            try:
+                from x402.schemas import PaymentRequirements
+                from x402.schemas.helpers import parse_payment_payload
+
+                _raw_pay = base64.b64decode(payment_header) if not payment_header.strip().startswith("{") else payment_header.encode()
+                pay_payload = parse_payment_payload(_raw_pay)
+                pay_requirements = PaymentRequirements(
+                    scheme="exact",
+                    network=X402_NETWORK,
+                    asset=X402_ASSET,
+                    amount=X402_AMOUNT,
+                    pay_to=X402_WALLET,
+                    max_timeout_seconds=300,
+                    extra={"name": X402_TOKEN_NAME, "version": X402_TOKEN_VERSION},
+                )
+                settle_result = _settle_scheme.settle(pay_payload, pay_requirements)
+                if not settle_result.success:
+                    reason = settle_result.error_reason or "unknown"
+                    msg = settle_result.error_message or ""
+                    logger.warning("x402 settlement failed: %s %s", reason, msg)
+                    log_call(tool_name, "x402:failed", status_code=402, client_ip=client_ip)
+                    return JSONResponse(
+                        status_code=402,
+                        content={"error": f"Payment settlement failed: {reason}" + (f" ({msg})" if msg else "")},
+                        headers={"Cache-Control": "no-store", "PAYMENT-REQUIRED": _payment_required_header(path)},
+                    )
+                payer = settle_result.payer or "unknown"
+                logger.info("x402 settled on-chain: tx=%s payer=%s", settle_result.transaction, payer)
+            except Exception as e:
+                logger.error("x402 settlement error: %s", e)
+                log_call(tool_name, "x402:failed", status_code=402, client_ip=client_ip)
+                return JSONResponse(
+                    status_code=402,
+                    content={"error": f"Payment settlement error: {e}"},
+                    headers={"Cache-Control": "no-store", "PAYMENT-REQUIRED": _payment_required_header(path)},
+                )
+        elif X402_VERIFY:
+            # Fallback: local EIP-712 verification only (no on-chain settlement)
             verify_result = _verify_payment_locally(payment_header)
             if not verify_result["valid"]:
                 logger.warning("x402 verification failed: %s", verify_result["reason"])
@@ -368,23 +432,41 @@ async def auth_and_metering(request: Request, call_next):
     new_headers["Vary"] = "Payment-Signature"
 
     # Attach PAYMENT-RESPONSE header on successful paid responses (x402 v2 spec).
-    # Must include 'success', 'transaction', and 'network' fields for SettleResponse
-    # compatibility with the x402 Python SDK's get_payment_settle_response().
     if 200 <= response.status_code < 300:
-        verification_mode = "local-eip712" if X402_VERIFY else "none"
-        settlement = {
-            "success": True,
-            "transaction": sig_hash,
-            "transactionType": "receipt" if verification_mode == "local-eip712" else "none",
-            "network": X402_NETWORK,
-            "x402Version": 2,
-            "scheme": "exact",
-            "asset": X402_ASSET,
-            "amount": X402_AMOUNT,
-            "payTo": X402_WALLET,
-            "payer": payer,
-            "verification": verification_mode,
-        }
+        if settle_result and settle_result.success:
+            # On-chain settlement: real tx hash, verifiable on Base
+            tx_hash = settle_result.transaction
+            if not tx_hash.startswith("0x"):
+                tx_hash = "0x" + tx_hash
+            settlement = {
+                "success": True,
+                "transaction": tx_hash,
+                "transactionType": "transfer",
+                "network": X402_NETWORK,
+                "x402Version": 2,
+                "scheme": "exact",
+                "asset": X402_ASSET,
+                "amount": X402_AMOUNT,
+                "payTo": X402_WALLET,
+                "payer": payer,
+                "verification": "on-chain",
+            }
+        else:
+            # Fallback: local verification only (no on-chain proof)
+            verification_mode = "local-eip712" if X402_VERIFY else "none"
+            settlement = {
+                "success": True,
+                "transaction": sig_hash,
+                "transactionType": "receipt" if verification_mode == "local-eip712" else "none",
+                "network": X402_NETWORK,
+                "x402Version": 2,
+                "scheme": "exact",
+                "asset": X402_ASSET,
+                "amount": X402_AMOUNT,
+                "payTo": X402_WALLET,
+                "payer": payer,
+                "verification": verification_mode,
+            }
         encoded = base64.b64encode(_json.dumps(settlement).encode()).decode()
         new_headers["PAYMENT-RESPONSE"] = encoded
 
