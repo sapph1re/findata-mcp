@@ -1,33 +1,21 @@
 # FinData MCP — Registry Submission Guide
 
-**Status**: READY TO SUBMIT — all internal tasks complete. External setup required.
-**Updated**: 2026-03-01 (Task 29 + 30 both completed, blockers cleared)
+**Status**: READY TO SUBMIT — waiting on 3 human actions only.
+**Updated**: 2026-03-11 (T31 Signal — Railway live, E2E 16/16 PASS, PyPI whl built)
 
 ---
 
 ## Prerequisites Status
 
-- [x] Task 28 complete — MCP server built, all 5 tools working (49/49 tests pass)
-- [x] Task 29 complete — x402 payments + API key auth working (49/49 tests pass)
-- [x] Task 30 complete — Deployed at localhost:8080, all tools returning live data
-- [ ] **NEEDED: GitHub repo public at `github.com/cortex-labs/findata-mcp`**
-- [ ] **NEEDED: Domain `findata-mcp.io` registered + pointing to cloud server**
-- [ ] **NEEDED: PyPI package published as `findata-mcp` (for `pip install`/`uvx`)**
-- [ ] **NEEDED: Cloud deployment (Railway/Fly/VPS) with public IP**
-
-### To complete cloud deployment (Task 30 result):
-```bash
-# Option A: Railway (simplest)
-npm install -g @railway/cli
-railway login
-cd /opt/cortex/services/findata-mcp
-railway init && railway up
-
-# Option B: Docker + VPS
-docker build -t findata-mcp .
-docker run -d -p 8080:8080 findata-mcp
-# Then point findata-mcp.io DNS A record to the VPS IP
-```
+- [x] Task 28 complete — MCP server built, all 5 tools working
+- [x] Task 29 complete — x402 v2 micropayments on Base mainnet (49/49 tests pass)
+- [x] Task 87/88 complete — E2E 16/16 PASS, registry_ready=1
+- [x] **DONE: Cloud deployment — Railway live at https://findata-mcp-production-1cd3.up.railway.app**
+- [x] **DONE: PyPI package built — dist/findata_mcp-0.1.0-py3-none-any.whl + .tar.gz (twine PASS)**
+- [ ] **NEEDED: GitHub repo `sapph1re/findata-mcp` made **public** (Settings → Danger Zone → Change visibility)**
+- [ ] **NEEDED: PyPI account + token to upload (`twine upload dist/*`)**
+- [ ] **NEEDED: Human accounts on Smithery / Glama / mcp.so to submit**
+- [ ] **OPTIONAL: Domain `findata-mcp.io` (can submit with Railway URL until domain is ready)**
 
 ---
 
@@ -60,7 +48,7 @@ docker run -d -p 8080:8080 findata-mcp
 3. **Submit via Smithery web form**:
    - URL: https://smithery.ai/new
    - Required fields:
-     - GitHub repo URL: `https://github.com/cortex-labs/findata-mcp`
+     - GitHub repo URL: `https://github.com/sapph1re/findata-mcp`
      - Smithery will auto-detect `smithery.yaml` from the repo root
    - Alternative: Submit a PR to `smithery-ai/registry` GitHub repo
 
@@ -89,12 +77,12 @@ docker run -d -p 8080:8080 findata-mcp
 
 1. **GitHub namespace verification**:
    - Glama verifies you own the GitHub repo
-   - Ensure `github.com/cortex-labs/findata-mcp` is public
+   - Ensure `github.com/sapph1re/findata-mcp` is public
 
 2. **Submit via Glama web form**:
    - URL: https://glama.ai/mcp/servers/submit (or check https://glama.ai/mcp)
    - Upload or link `server.json` from the repo
-   - Alternative: Glama may auto-index from GitHub — check if `github.com/cortex-labs/findata-mcp` appears automatically after making public
+   - Alternative: Glama may auto-index from GitHub — check if `github.com/sapph1re/findata-mcp` appears automatically after making public
 
 3. **Verify**:
    - Search `https://glama.ai/mcp/servers` for "findata"
@@ -151,7 +139,7 @@ docker run -d -p 8080:8080 findata-mcp
 
 **Install command**: `uvx findata-mcp` or `smithery install findata-mcp`
 
-**GitHub**: https://github.com/cortex-labs/findata-mcp
+**GitHub**: https://github.com/sapph1re/findata-mcp
 
 **Homepage**: https://findata-mcp.io
 
@@ -179,7 +167,7 @@ docker run -d -p 8080:8080 findata-mcp
 - PR to: https://github.com/punkpeye/awesome-mcp-servers
 - Add under `Finance` section:
   ```markdown
-  - [findata-mcp](https://github.com/cortex-labs/findata-mcp) - Real-time stocks, fundamentals, FRED economics, SEC filings, and crypto. x402 pay-per-call or free API key.
+  - [findata-mcp](https://github.com/sapph1re/findata-mcp) - Real-time stocks, fundamentals, FRED economics, SEC filings, and crypto. x402 pay-per-call or free API key.
   ```
 
 ---
@@ -209,17 +197,20 @@ docker run -d -p 8080:8080 findata-mcp
 
 ## Summary of Required Human Actions (in order)
 
-1. **Register domain** `findata-mcp.io` (Namecheap/Cloudflare, ~$12/yr)
-2. **Deploy to cloud** — Railway is fastest: `railway login && railway up` in `/opt/cortex/services/findata-mcp`
-3. **Point DNS** — A record for `findata-mcp.io` → cloud server IP
-4. **Push to GitHub** — Create `cortex-labs/findata-mcp` repo, push all files from `/opt/cortex/services/findata-mcp`
-5. **Publish to PyPI** — `pip install build twine && python -m build && twine upload dist/*` (needs PyPI token)
-6. **Submit to Smithery** — https://smithery.ai/new, paste GitHub URL, `smithery.yaml` is in repo root
-7. **Submit to Glama** — https://glama.ai/mcp/servers/submit, `server.json` is in repo root
-8. **Submit to mcp.so** — Use copy from "mcp.so submission copy" section above
-9. **Test install** — `smithery install findata-mcp` from clean terminal
+**Already done (by agents):**
+- ~~Deploy to cloud~~ — Live at https://findata-mcp-production-1cd3.up.railway.app (Railway, mainnet, 16/16 E2E PASS)
+- ~~Build PyPI package~~ — `dist/findata_mcp-0.1.0-py3-none-any.whl` ready, twine PASS
 
-All code artifacts are production-ready. 49/49 tests pass. ETA after human setup: ~2-3 days (registry review times).
+**Human actions needed:**
+1. **Make GitHub repo public** — Go to https://github.com/sapph1re/findata-mcp → Settings → Danger Zone → Change visibility → Public
+2. **Publish to PyPI** — `cd /opt/cortex/services/findata-mcp && twine upload dist/*` (needs PyPI account + token at pypi.org/manage/account/token/)
+3. **Submit to Smithery** — https://smithery.ai/new, paste `https://github.com/sapph1re/findata-mcp`, `smithery.yaml` is in repo root
+4. **Submit to Glama** — https://glama.ai/mcp/servers/submit, `server.json` is in repo root
+5. **Submit to mcp.so** — Use copy from "mcp.so submission copy" section above
+6. **Test install** — `smithery install findata-mcp` from clean terminal
+7. **(Optional) Register domain** `findata-mcp.io` (Namecheap/Cloudflare, ~$12/yr) and point DNS A record to Railway
+
+ETA after human actions complete: ~2-3 days (registry review times).
 
 ---
 
