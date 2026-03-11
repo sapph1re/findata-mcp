@@ -14,7 +14,7 @@ import json as _json
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.responses import Response
 
 from metering import init_metering_db, log_call
@@ -326,6 +326,23 @@ def api_stats():
     from metering import get_usage_stats
     return get_usage_stats()
 
+
+# ── Legacy path redirects (backwards compatibility) ──
+# Routes were moved to /api/v1/ prefix; redirect old paths so existing
+# clients, docs, and registry submissions keep working.
+
+_LEGACY_TOOLS = ("stock_quote", "company_fundamentals", "economic_indicator",
+                 "sec_filing", "crypto_price")
+
+for _tool in _LEGACY_TOOLS:
+    def _make_redirect(tool_name: str):
+        async def _redirect(request: Request):
+            qs = str(request.url.query)
+            target = f"/api/v1/{tool_name}" + (f"?{qs}" if qs else "")
+            return RedirectResponse(url=target, status_code=307)
+        _redirect.__name__ = f"legacy_redirect_{tool_name}"
+        return _redirect
+    app.add_api_route(f"/{_tool}", _make_redirect(_tool), methods=["GET"])
 
 # ── Paid tool endpoints ──
 
