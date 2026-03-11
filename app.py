@@ -69,10 +69,15 @@ def _init_settlement():
     except Exception as e:
         logger.error("Failed to initialize on-chain settlement: %s", e)
 
-# Routes that require payment
+# Routes that require payment — both canonical /api/v1/ and legacy root paths.
+# Legacy root paths are registered as direct handlers (NOT redirects) because the
+# x402 Python SDK's httpx client breaks on 307 redirects with streaming body errors.
 PAID_PREFIXES = ("/api/v1/stock_quote", "/api/v1/company_fundamentals",
                  "/api/v1/economic_indicator", "/api/v1/sec_filing",
-                 "/api/v1/crypto_price")
+                 "/api/v1/crypto_price",
+                 "/stock_quote", "/company_fundamentals",
+                 "/economic_indicator", "/sec_filing",
+                 "/crypto_price")
 
 # In-memory replay protection — belt-and-suspenders alongside SQLite.
 # Catches replays even if SQLite file doesn't persist (e.g. ephemeral Railway storage).
@@ -518,11 +523,6 @@ def api_stats():
     return get_usage_stats()
 
 
-# Legacy root paths (/{tool}) removed — they caused x402 SDK failures.
-# The x402 Python SDK's httpx client breaks on 307 redirects with:
-# "Attempted to access streaming request content, without having called read()"
-# All clients should use /api/v1/{tool} directly.
-
 # ── Paid tool endpoints ──
 
 @app.get("/api/v1/stock_quote")
@@ -631,3 +631,40 @@ def api_crypto_price(
         return err
     crypto_cache.set(f"crypto:{coin_id}", result)
     return result
+
+
+# ── Legacy root paths ──
+# Registered as direct handlers (NOT 307 redirects) because the x402 Python SDK's
+# httpx client breaks on redirects with: "Attempted to access streaming request
+# content, without having called read()". These delegate to the canonical handlers.
+
+@app.get("/stock_quote", include_in_schema=False)
+def legacy_stock_quote(
+    ticker: str = Query(None), symbol: str = Query(None),
+):
+    return api_stock_quote(ticker=ticker, symbol=symbol)
+
+@app.get("/company_fundamentals", include_in_schema=False)
+def legacy_company_fundamentals(
+    ticker: str = Query(None), symbol: str = Query(None),
+):
+    return api_company_fundamentals(ticker=ticker, symbol=symbol)
+
+@app.get("/economic_indicator", include_in_schema=False)
+def legacy_economic_indicator(
+    series_id: str = Query(None), indicator: str = Query(None),
+):
+    return api_economic_indicator(series_id=series_id, indicator=indicator)
+
+@app.get("/sec_filing", include_in_schema=False)
+def legacy_sec_filing(
+    ticker_or_cik: str = Query(None), ticker: str = Query(None),
+    form_type: str = Query("10-K"),
+):
+    return api_sec_filing(ticker_or_cik=ticker_or_cik, ticker=ticker, form_type=form_type)
+
+@app.get("/crypto_price", include_in_schema=False)
+def legacy_crypto_price(
+    coin_id: str = Query(None), symbol: str = Query(None),
+):
+    return api_crypto_price(coin_id=coin_id, symbol=symbol)
