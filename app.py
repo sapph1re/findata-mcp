@@ -29,11 +29,17 @@ logger = logging.getLogger("findata-mcp")
 X402_WALLET = os.environ.get(
     "X402_WALLET_ADDRESS", "0x0000000000000000000000000000000000000000"
 )
-X402_NETWORK = os.environ.get("X402_NETWORK", "eip155:84532")  # Base Sepolia testnet
+X402_NETWORK = os.environ.get("X402_NETWORK", "eip155:8453")  # Base mainnet
+# Note: x402.org facilitator does not support Base mainnet "exact" scheme as of 2026-03.
+# When enabling verification, use a CDP facilitator or self-hosted one.
 X402_FACILITATOR = os.environ.get(
     "X402_FACILITATOR_URL", "https://x402.org/facilitator"
 )
-X402_PRICE = "$0.01"
+# USDC contract address (Base mainnet default)
+X402_ASSET = os.environ.get(
+    "X402_ASSET_ADDRESS", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+)
+X402_AMOUNT = os.environ.get("X402_AMOUNT", "10000")  # $0.01 USDC (6 decimals)
 X402_VERIFY = os.environ.get("X402_VERIFY", "false").lower() == "true"
 
 # Routes that require payment
@@ -78,27 +84,30 @@ def _is_paid_route(path: str) -> bool:
 
 
 def _build_402_response(path: str) -> JSONResponse:
-    """Build HTTP 402 Payment Required response with x402 payment instructions."""
+    """Build HTTP 402 Payment Required response per x402 v2 spec."""
+    from x402.schemas import PaymentRequired, PaymentRequirements, ResourceInfo
+    payment_required = PaymentRequired(
+        x402_version=2,
+        accepts=[
+            PaymentRequirements(
+                scheme="exact",
+                network=X402_NETWORK,
+                asset=X402_ASSET,
+                amount=X402_AMOUNT,
+                pay_to=X402_WALLET,
+                max_timeout_seconds=300,
+            )
+        ],
+        resource=ResourceInfo(
+            url=path,
+            description=f"FinData API: {_extract_tool_name(path)}",
+            mime_type="application/json",
+        ),
+        error="Payment required",
+    )
     return JSONResponse(
         status_code=402,
-        content={
-            "error": "Payment Required",
-            "message": "This endpoint requires payment via x402 protocol ($0.01 per call).",
-            "x402": {
-                "version": "2",
-                "accepts": [
-                    {
-                        "scheme": "exact",
-                        "network": X402_NETWORK,
-                        "pay_to": X402_WALLET,
-                        "price": X402_PRICE,
-                        "description": f"FinData API: {_extract_tool_name(path)}",
-                        "mime_type": "application/json",
-                    }
-                ],
-                "facilitator": X402_FACILITATOR,
-            },
-        },
+        content=payment_required.model_dump(by_alias=True, exclude_none=True),
         headers={"X-Payment-Required": "x402"},
     )
 
@@ -116,19 +125,38 @@ async def auth_and_metering(request: Request, call_next):
 
     tool_name = _extract_tool_name(path)
 
-    # Check x402 payment
-    if request.headers.get("X-PAYMENT"):
+    # Check x402 payment — accept both v2 (PAYMENT-SIGNATURE) and v1 (X-PAYMENT)
+    payment_header = (
+        request.headers.get("payment-signature")
+        or request.headers.get("X-PAYMENT")
+    )
+    if payment_header:
         payment_method = "x402"
         if X402_VERIFY:
             try:
                 import httpx
-                async with httpx.AsyncClient() as client:
+                from x402.schemas import PaymentRequirements
+                from x402.schemas.helpers import parse_payment_payload
+                payment_payload = parse_payment_payload(payment_header)
+                payment_requirements = PaymentRequirements(
+                    scheme="exact",
+                    network=X402_NETWORK,
+                    asset=X402_ASSET,
+                    amount=X402_AMOUNT,
+                    pay_to=X402_WALLET,
+                    max_timeout_seconds=300,
+                )
+                async with httpx.AsyncClient(follow_redirects=True) as client:
                     resp = await client.post(
                         f"{X402_FACILITATOR}/verify",
                         json={
-                            "payment": request.headers["X-PAYMENT"],
-                            "payTo": X402_WALLET,
-                            "network": X402_NETWORK,
+                            "x402Version": 2,
+                            "paymentPayload": payment_payload.model_dump(
+                                by_alias=True, exclude_none=True
+                            ),
+                            "paymentRequirements": payment_requirements.model_dump(
+                                by_alias=True, exclude_none=True
+                            ),
                         },
                     )
                     if resp.status_code != 200:

@@ -106,20 +106,25 @@ class TestAPIMiddleware(unittest.TestCase):
         self.assertEqual(resp.json()["status"], "ok")
 
     def test_402_without_payment(self):
-        """Paid endpoint returns 402 with x402 payment instructions when no payment."""
+        """Paid endpoint returns 402 with x402 v2 payment instructions when no payment."""
         resp = self.client.get("/api/v1/stock_quote?ticker=AAPL")
         self.assertEqual(resp.status_code, 402)
         data = resp.json()
-        self.assertEqual(data["error"], "Payment Required")
-        self.assertIn("x402", data)
-        self.assertEqual(data["x402"]["accepts"][0]["price"], "$0.01")
-        self.assertEqual(data["x402"]["accepts"][0]["scheme"], "exact")
-        self.assertIn("facilitator", data["x402"])
+        self.assertEqual(data["x402Version"], 2)
+        self.assertEqual(data["error"], "Payment required")
+        accepts = data["accepts"]
+        self.assertEqual(len(accepts), 1)
+        self.assertEqual(accepts[0]["scheme"], "exact")
+        self.assertEqual(accepts[0]["amount"], "10000")
+        self.assertIn("asset", accepts[0])
+        self.assertIn("payTo", accepts[0])
+        self.assertIn("maxTimeoutSeconds", accepts[0])
+        self.assertIn("resource", data)
         # No api_key section anymore
         self.assertNotIn("api_key", data)
 
-    def test_x402_payment_accepted(self):
-        """x402 payment header is accepted in test mode (X402_VERIFY=false)."""
+    def test_x402_payment_accepted_v1_header(self):
+        """x402 v1 X-PAYMENT header is accepted in test mode (X402_VERIFY=false)."""
         from unittest.mock import patch
         with patch("app.get_stock_quote") as mock_fn:
             mock_fn.return_value = {"ticker": "AAPL", "price": 185.50}
@@ -132,6 +137,21 @@ class TestAPIMiddleware(unittest.TestCase):
             )
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.json()["ticker"], "AAPL")
+
+    def test_x402_payment_accepted_v2_header(self):
+        """x402 v2 PAYMENT-SIGNATURE header is accepted in test mode (X402_VERIFY=false)."""
+        from unittest.mock import patch
+        with patch("app.get_stock_quote") as mock_fn:
+            mock_fn.return_value = {"ticker": "MSFT", "price": 420.00}
+            from app import stock_cache
+            stock_cache.clear()
+
+            resp = self.client.get(
+                "/api/v1/stock_quote?ticker=MSFT",
+                headers={"PAYMENT-SIGNATURE": "test-payment-v2-sig"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json()["ticker"], "MSFT")
 
     def test_metering_logs_calls(self):
         """Verify metering table gets populated from middleware."""
