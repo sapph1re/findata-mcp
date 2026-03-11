@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 
 from metering import init_metering_db, log_call
 from cache import TTLCache
@@ -239,6 +240,15 @@ async def auth_and_metering(request: Request, call_next):
     payer = verify_result.get("payer", "unknown") if X402_VERIFY else "unverified"
     response = await call_next(request)
 
+    # Read the streaming response body so we can build a new Response with extra headers.
+    # Starlette's call_next returns a StreamingResponse whose headers may already be sealed;
+    # adding headers after the fact doesn't reliably propagate them.
+    body = b""
+    async for chunk in response.body_iterator:
+        body += chunk
+
+    new_headers = dict(response.headers)
+
     # Attach PAYMENT-RESPONSE header on successful paid responses (x402 v2 spec)
     if 200 <= response.status_code < 300:
         settlement = {
@@ -253,7 +263,7 @@ async def auth_and_metering(request: Request, call_next):
             "settlement": "signature-verified",
         }
         encoded = base64.b64encode(_json.dumps(settlement).encode()).decode()
-        response.headers["PAYMENT-RESPONSE"] = encoded
+        new_headers["PAYMENT-RESPONSE"] = encoded
 
     elapsed_ms = (time.monotonic() - start) * 1000
     log_call(
@@ -263,7 +273,12 @@ async def auth_and_metering(request: Request, call_next):
         status_code=response.status_code,
         client_ip=client_ip,
     )
-    return response
+    return Response(
+        content=body,
+        status_code=response.status_code,
+        headers=new_headers,
+        media_type=response.media_type,
+    )
 
 
 # ── Free endpoints ──
