@@ -23,7 +23,7 @@ from tools.stock_quote import get_stock_quote
 from tools.company_fundamentals import get_company_fundamentals
 from tools.economic_indicator import get_economic_indicator
 from tools.sec_filing import get_sec_filing
-from tools.crypto_price import get_crypto_price
+from tools.crypto_price import get_crypto_price, resolve_coin_id
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("findata-mcp")
@@ -399,10 +399,12 @@ def api_crypto_price(
     coin_id = coin_id or symbol
     if not coin_id:
         return JSONResponse(status_code=422, content={"error": "Missing required parameter: coin_id (or symbol)"})
-    coin_id = coin_id.strip().lower()
+    coin_id = resolve_coin_id(coin_id)
     cached = crypto_cache.get(f"crypto:{coin_id}")
     if cached is not None:
         return cached
     result = get_crypto_price(coin_id)
+    if "error" in result and "not found" in result["error"].lower():
+        return JSONResponse(status_code=404, content=result)
     crypto_cache.set(f"crypto:{coin_id}", result)
     return result

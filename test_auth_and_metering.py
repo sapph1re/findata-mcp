@@ -378,6 +378,30 @@ class TestAPIMiddleware(unittest.TestCase):
 # Cleanup
 # ──────────────────────────────────────────────────────────────────
 
+class TestSymbolResolution(unittest.TestCase):
+    """Tests for crypto_price symbol → CoinGecko ID resolution."""
+
+    def test_known_symbols_resolve(self):
+        from tools.crypto_price import resolve_coin_id
+        self.assertEqual(resolve_coin_id("BTC"), "bitcoin")
+        self.assertEqual(resolve_coin_id("ETH"), "ethereum")
+        self.assertEqual(resolve_coin_id("SOL"), "solana")
+        self.assertEqual(resolve_coin_id("Doge"), "dogecoin")
+
+    def test_coingecko_ids_pass_through(self):
+        from tools.crypto_price import resolve_coin_id
+        self.assertEqual(resolve_coin_id("bitcoin"), "bitcoin")
+        self.assertEqual(resolve_coin_id("ethereum"), "ethereum")
+
+    def test_unknown_symbol_passes_through(self):
+        from tools.crypto_price import resolve_coin_id
+        self.assertEqual(resolve_coin_id("notacoin"), "notacoin")
+
+    def test_whitespace_handled(self):
+        from tools.crypto_price import resolve_coin_id
+        self.assertEqual(resolve_coin_id("  BTC  "), "bitcoin")
+
+
 def tearDownModule():
     try:
         os.unlink(TEST_DB_PATH)

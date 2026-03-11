@@ -7,6 +7,59 @@ import requests
 
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
+# Map common ticker symbols to CoinGecko coin IDs
+SYMBOL_TO_COINGECKO_ID: dict[str, str] = {
+    "btc": "bitcoin",
+    "eth": "ethereum",
+    "sol": "solana",
+    "bnb": "binancecoin",
+    "xrp": "ripple",
+    "ada": "cardano",
+    "doge": "dogecoin",
+    "dot": "polkadot",
+    "matic": "matic-network",
+    "shib": "shiba-inu",
+    "avax": "avalanche-2",
+    "link": "chainlink",
+    "uni": "uniswap",
+    "atom": "cosmos",
+    "ltc": "litecoin",
+    "etc": "ethereum-classic",
+    "xlm": "stellar",
+    "near": "near",
+    "apt": "aptos",
+    "arb": "arbitrum",
+    "op": "optimism",
+    "sui": "sui",
+    "usdt": "tether",
+    "usdc": "usd-coin",
+    "dai": "dai",
+    "wbtc": "wrapped-bitcoin",
+    "weth": "weth",
+    "pepe": "pepe",
+    "fil": "filecoin",
+    "hbar": "hedera-hashgraph",
+    "icp": "internet-computer",
+    "vet": "vechain",
+    "aave": "aave",
+    "mkr": "maker",
+    "crv": "curve-dao-token",
+    "ldo": "lido-dao",
+    "render": "render-token",
+    "ftm": "fantom",
+    "algo": "algorand",
+    "sei": "sei-network",
+    "inj": "injective-protocol",
+    "stx": "blockstack",
+    "trx": "tron",
+}
+
+
+def resolve_coin_id(raw: str) -> str:
+    """Resolve a symbol or coin_id to a CoinGecko coin ID."""
+    normalized = raw.strip().lower()
+    return SYMBOL_TO_COINGECKO_ID.get(normalized, normalized)
+
 
 def get_crypto_price(coin_id: str) -> dict[str, Any]:
     """Fetch cryptocurrency price data from CoinGecko."""
