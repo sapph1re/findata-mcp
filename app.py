@@ -40,7 +40,10 @@ X402_ASSET = os.environ.get(
     "X402_ASSET_ADDRESS", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 )
 X402_AMOUNT = os.environ.get("X402_AMOUNT", "10000")  # $0.01 USDC (6 decimals)
-X402_VERIFY = os.environ.get("X402_VERIFY", "false").lower() == "true"
+X402_VERIFY = os.environ.get("X402_VERIFY", "true").lower() == "true"
+# EIP-712 domain params for USDC on Base mainnet
+X402_TOKEN_NAME = os.environ.get("X402_TOKEN_NAME", "USD Coin")
+X402_TOKEN_VERSION = os.environ.get("X402_TOKEN_VERSION", "2")
 
 # Routes that require payment
 PAID_PREFIXES = ("/api/v1/stock_quote", "/api/v1/company_fundamentals",
@@ -96,6 +99,7 @@ def _build_402_response(path: str) -> JSONResponse:
                 amount=X402_AMOUNT,
                 pay_to=X402_WALLET,
                 max_timeout_seconds=300,
+                extra={"name": X402_TOKEN_NAME, "version": X402_TOKEN_VERSION},
             )
         ],
         resource=ResourceInfo(
@@ -110,6 +114,87 @@ def _build_402_response(path: str) -> JSONResponse:
         content=payment_required.model_dump(by_alias=True, exclude_none=True),
         headers={"X-Payment-Required": "x402"},
     )
+
+
+def _verify_payment_locally(payment_header: str) -> dict:
+    """Verify x402 EIP-3009 payment signature locally (no external facilitator).
+
+    Validates:
+    - Payment payload is well-formed x402 v2
+    - Authorization recipient matches our wallet
+    - Authorization amount >= our required amount
+    - Validity window is correct (validAfter <= now, validBefore > now)
+    - EIP-712 signature is cryptographically valid for the claimed sender
+
+    Returns dict with 'valid' (bool) and 'reason' (str) on failure.
+    """
+    import json as _json
+    try:
+        from x402.schemas.helpers import parse_payment_payload
+        from x402.mechanisms.evm.types import ExactEIP3009Payload
+        from x402.mechanisms.evm.eip712 import hash_eip3009_authorization
+        from x402.mechanisms.evm.verify import verify_eoa_signature
+        from x402.mechanisms.evm.utils import get_evm_chain_id, hex_to_bytes
+    except ImportError as e:
+        logger.error("x402 EVM packages not available: %s", e)
+        return {"valid": False, "reason": "Server missing EVM verification packages"}
+
+    # Parse the payment header (may be base64 or JSON)
+    try:
+        import base64
+        try:
+            raw = base64.b64decode(payment_header)
+        except Exception:
+            raw = payment_header.encode() if isinstance(payment_header, str) else payment_header
+        payload = parse_payment_payload(raw)
+    except Exception as e:
+        return {"valid": False, "reason": f"Malformed payment payload: {e}"}
+
+    # Must be v2
+    if not hasattr(payload, 'accepted') or not hasattr(payload, 'payload'):
+        return {"valid": False, "reason": "Not a valid x402 v2 payment payload"}
+
+    # Extract EIP-3009 authorization
+    try:
+        evm_payload = ExactEIP3009Payload.from_dict(payload.payload)
+    except Exception as e:
+        return {"valid": False, "reason": f"Invalid EVM payload: {e}"}
+
+    auth = evm_payload.authorization
+
+    # Validate recipient matches our wallet
+    if auth.to.lower() != X402_WALLET.lower():
+        return {"valid": False, "reason": "Recipient mismatch"}
+
+    # Validate amount
+    if int(auth.value) < int(X402_AMOUNT):
+        return {"valid": False, "reason": f"Insufficient amount: {auth.value} < {X402_AMOUNT}"}
+
+    # Validate timing
+    import time as _time
+    now = int(_time.time())
+    if int(auth.valid_before) < now + 6:
+        return {"valid": False, "reason": "Authorization expired"}
+    if int(auth.valid_after) > now:
+        return {"valid": False, "reason": "Authorization not yet valid"}
+
+    # Verify EIP-712 signature
+    if not evm_payload.signature:
+        return {"valid": False, "reason": "Missing signature"}
+
+    try:
+        chain_id = get_evm_chain_id(X402_NETWORK)
+        hash_bytes = hash_eip3009_authorization(
+            auth, chain_id, X402_ASSET, X402_TOKEN_NAME, X402_TOKEN_VERSION
+        )
+        sig_bytes = hex_to_bytes(evm_payload.signature)
+        valid = verify_eoa_signature(hash_bytes, sig_bytes, auth.from_address)
+        if not valid:
+            return {"valid": False, "reason": "Invalid signature"}
+    except Exception as e:
+        return {"valid": False, "reason": f"Signature verification error: {e}"}
+
+    return {"valid": True, "payer": auth.from_address}
 
 
 @app.middleware("http")
@@ -133,44 +218,13 @@ async def auth_and_metering(request: Request, call_next):
     if payment_header:
         payment_method = "x402"
         if X402_VERIFY:
-            try:
-                import httpx
-                from x402.schemas import PaymentRequirements
-                from x402.schemas.helpers import parse_payment_payload
-                payment_payload = parse_payment_payload(payment_header)
-                payment_requirements = PaymentRequirements(
-                    scheme="exact",
-                    network=X402_NETWORK,
-                    asset=X402_ASSET,
-                    amount=X402_AMOUNT,
-                    pay_to=X402_WALLET,
-                    max_timeout_seconds=300,
-                )
-                async with httpx.AsyncClient(follow_redirects=True) as client:
-                    resp = await client.post(
-                        f"{X402_FACILITATOR}/verify",
-                        json={
-                            "x402Version": 2,
-                            "paymentPayload": payment_payload.model_dump(
-                                by_alias=True, exclude_none=True
-                            ),
-                            "paymentRequirements": payment_requirements.model_dump(
-                                by_alias=True, exclude_none=True
-                            ),
-                        },
-                    )
-                    if resp.status_code != 200:
-                        log_call(tool_name, "x402:failed", status_code=402, client_ip=client_ip)
-                        return JSONResponse(
-                            status_code=402,
-                            content={"error": "Payment verification failed"},
-                        )
-            except Exception as e:
-                logger.error("x402 verification error: %s", e)
-                log_call(tool_name, "x402:error", status_code=500, client_ip=client_ip)
+            verify_result = _verify_payment_locally(payment_header)
+            if not verify_result["valid"]:
+                logger.warning("x402 verification failed: %s", verify_result["reason"])
+                log_call(tool_name, "x402:failed", status_code=402, client_ip=client_ip)
                 return JSONResponse(
-                    status_code=500,
-                    content={"error": "Payment verification service unavailable"},
+                    status_code=402,
+                    content={"error": f"Payment verification failed: {verify_result['reason']}"},
                 )
     else:
         # No payment — return 402
@@ -250,8 +304,14 @@ def api_company_fundamentals(ticker: str = Query(..., description="Stock ticker 
 
 
 @app.get("/api/v1/economic_indicator")
-def api_economic_indicator(series_id: str = Query(..., description="FRED series ID (e.g. GDP, CPIAUCSL, UNRATE)")):
+def api_economic_indicator(
+    series_id: str = Query(None, description="FRED series ID (e.g. GDP, CPIAUCSL, UNRATE)"),
+    indicator: str = Query(None, description="Alias for series_id"),
+):
     """US macroeconomic data from the Federal Reserve FRED database."""
+    series_id = series_id or indicator
+    if not series_id:
+        return JSONResponse(status_code=422, content={"error": "Missing required parameter: series_id (or indicator)"})
     series_id = series_id.upper().strip()
     cached = economic_cache.get(f"econ:{series_id}")
     if cached is not None:
@@ -263,10 +323,14 @@ def api_economic_indicator(series_id: str = Query(..., description="FRED series 
 
 @app.get("/api/v1/sec_filing")
 def api_sec_filing(
-    ticker_or_cik: str = Query(..., description="Ticker (AAPL) or CIK (320193)"),
+    ticker_or_cik: str = Query(None, description="Ticker (AAPL) or CIK (320193)"),
+    ticker: str = Query(None, description="Alias for ticker_or_cik"),
     form_type: str = Query("10-K", description="Form type (10-K, 10-Q, 8-K, DEF 14A, S-1)"),
 ):
     """Full text of SEC filings from EDGAR."""
+    ticker_or_cik = ticker_or_cik or ticker
+    if not ticker_or_cik:
+        return JSONResponse(status_code=422, content={"error": "Missing required parameter: ticker_or_cik (or ticker)"})
     ticker_or_cik = ticker_or_cik.strip().upper()
     form_type = form_type.strip().upper()
     cache_key = f"sec:{ticker_or_cik}:{form_type}"
@@ -279,8 +343,14 @@ def api_sec_filing(
 
 
 @app.get("/api/v1/crypto_price")
-def api_crypto_price(coin_id: str = Query(..., description="CoinGecko ID (e.g. bitcoin, ethereum, solana)")):
+def api_crypto_price(
+    coin_id: str = Query(None, description="CoinGecko ID (e.g. bitcoin, ethereum, solana)"),
+    symbol: str = Query(None, description="Alias for coin_id"),
+):
     """Cryptocurrency price, market cap, volume, and 7-day sparkline."""
+    coin_id = coin_id or symbol
+    if not coin_id:
+        return JSONResponse(status_code=422, content={"error": "Missing required parameter: coin_id (or symbol)"})
     coin_id = coin_id.strip().lower()
     cached = crypto_cache.get(f"crypto:{coin_id}")
     if cached is not None:

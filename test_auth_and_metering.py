@@ -124,34 +124,46 @@ class TestAPIMiddleware(unittest.TestCase):
         self.assertNotIn("api_key", data)
 
     def test_x402_payment_accepted_v1_header(self):
-        """x402 v1 X-PAYMENT header is accepted in test mode (X402_VERIFY=false)."""
+        """x402 v1 X-PAYMENT header is accepted when X402_VERIFY=false."""
         from unittest.mock import patch
-        with patch("app.get_stock_quote") as mock_fn:
-            mock_fn.return_value = {"ticker": "AAPL", "price": 185.50}
-            from app import stock_cache
-            stock_cache.clear()
+        import app as app_mod
+        original = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = False
+        try:
+            with patch("app.get_stock_quote") as mock_fn:
+                mock_fn.return_value = {"ticker": "AAPL", "price": 185.50}
+                from app import stock_cache
+                stock_cache.clear()
 
-            resp = self.client.get(
-                "/api/v1/stock_quote?ticker=AAPL",
-                headers={"X-PAYMENT": "test-payment-signature-abc123"},
-            )
-            self.assertEqual(resp.status_code, 200)
-            self.assertEqual(resp.json()["ticker"], "AAPL")
+                resp = self.client.get(
+                    "/api/v1/stock_quote?ticker=AAPL",
+                    headers={"X-PAYMENT": "test-payment-signature-abc123"},
+                )
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(resp.json()["ticker"], "AAPL")
+        finally:
+            app_mod.X402_VERIFY = original
 
     def test_x402_payment_accepted_v2_header(self):
-        """x402 v2 PAYMENT-SIGNATURE header is accepted in test mode (X402_VERIFY=false)."""
+        """x402 v2 PAYMENT-SIGNATURE header is accepted when X402_VERIFY=false."""
         from unittest.mock import patch
-        with patch("app.get_stock_quote") as mock_fn:
-            mock_fn.return_value = {"ticker": "MSFT", "price": 420.00}
-            from app import stock_cache
-            stock_cache.clear()
+        import app as app_mod
+        original = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = False
+        try:
+            with patch("app.get_stock_quote") as mock_fn:
+                mock_fn.return_value = {"ticker": "MSFT", "price": 420.00}
+                from app import stock_cache
+                stock_cache.clear()
 
-            resp = self.client.get(
-                "/api/v1/stock_quote?ticker=MSFT",
-                headers={"PAYMENT-SIGNATURE": "test-payment-v2-sig"},
-            )
-            self.assertEqual(resp.status_code, 200)
-            self.assertEqual(resp.json()["ticker"], "MSFT")
+                resp = self.client.get(
+                    "/api/v1/stock_quote?ticker=MSFT",
+                    headers={"PAYMENT-SIGNATURE": "test-payment-v2-sig"},
+                )
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(resp.json()["ticker"], "MSFT")
+        finally:
+            app_mod.X402_VERIFY = original
 
     def test_metering_logs_calls(self):
         """Verify metering table gets populated from middleware."""
@@ -203,6 +215,103 @@ class TestAPIMiddleware(unittest.TestCase):
             headers={"X-API-Key": "fd_live_some_key_here"},
         )
         self.assertEqual(resp.status_code, 402)
+
+    # ── Parameter alias tests (Task 90) ──
+
+    def test_economic_indicator_alias(self):
+        """economic_indicator accepts ?indicator= as alias for ?series_id=."""
+        resp = self.client.get("/api/v1/economic_indicator?indicator=GDP")
+        self.assertEqual(resp.status_code, 402)
+        # Confirm it didn't 422 — the alias was accepted
+        self.assertIn("x402Version", resp.json())
+
+    def test_sec_filing_alias(self):
+        """sec_filing accepts ?ticker= as alias for ?ticker_or_cik=."""
+        resp = self.client.get("/api/v1/sec_filing?ticker=TSLA")
+        self.assertEqual(resp.status_code, 402)
+        self.assertIn("x402Version", resp.json())
+
+    def test_crypto_price_alias(self):
+        """crypto_price accepts ?symbol= as alias for ?coin_id=."""
+        resp = self.client.get("/api/v1/crypto_price?symbol=BTC")
+        self.assertEqual(resp.status_code, 402)
+        self.assertIn("x402Version", resp.json())
+
+    def test_economic_indicator_no_params(self):
+        """economic_indicator with no params returns 402 (payment gate comes first)."""
+        resp = self.client.get("/api/v1/economic_indicator")
+        self.assertEqual(resp.status_code, 402)
+
+    def test_sec_filing_no_params(self):
+        """sec_filing with no params returns 402 (payment gate comes first)."""
+        resp = self.client.get("/api/v1/sec_filing")
+        self.assertEqual(resp.status_code, 402)
+
+    def test_crypto_price_no_params(self):
+        """crypto_price with no params returns 402 (payment gate comes first)."""
+        resp = self.client.get("/api/v1/crypto_price")
+        self.assertEqual(resp.status_code, 402)
+
+    # ── Signature verification tests (Task 91) ──
+
+    def test_garbage_payment_header_rejected(self):
+        """Garbage payment header is rejected when X402_VERIFY=true."""
+        import app as app_mod
+        original = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = True
+        try:
+            resp = self.client.get(
+                "/api/v1/stock_quote?ticker=AAPL",
+                headers={"X-PAYMENT": "garbage-not-a-real-signature"},
+            )
+            self.assertIn(resp.status_code, [402, 500])
+            self.assertNotEqual(resp.status_code, 200)
+        finally:
+            app_mod.X402_VERIFY = original
+
+    def test_garbage_v2_header_rejected(self):
+        """Garbage PAYMENT-SIGNATURE header is rejected when X402_VERIFY=true."""
+        import app as app_mod
+        original = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = True
+        try:
+            resp = self.client.get(
+                "/api/v1/stock_quote?ticker=AAPL",
+                headers={"PAYMENT-SIGNATURE": "not-valid-base64-or-json"},
+            )
+            self.assertIn(resp.status_code, [402, 500])
+            self.assertNotEqual(resp.status_code, 200)
+        finally:
+            app_mod.X402_VERIFY = original
+
+    def test_verify_false_accepts_any_header(self):
+        """When X402_VERIFY=false, any payment header is accepted (dev mode)."""
+        from unittest.mock import patch
+        import app as app_mod
+        original = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = False
+        try:
+            with patch("app.get_stock_quote") as mock_fn:
+                mock_fn.return_value = {"ticker": "AAPL", "price": 185.50}
+                from app import stock_cache
+                stock_cache.clear()
+                resp = self.client.get(
+                    "/api/v1/stock_quote?ticker=AAPL",
+                    headers={"X-PAYMENT": "any-garbage-header"},
+                )
+                self.assertEqual(resp.status_code, 200)
+        finally:
+            app_mod.X402_VERIFY = original
+
+    def test_402_includes_eip712_domain(self):
+        """402 response includes EIP-712 domain params (name, version) in extra."""
+        resp = self.client.get("/api/v1/stock_quote?ticker=AAPL")
+        self.assertEqual(resp.status_code, 402)
+        data = resp.json()
+        accepts = data["accepts"][0]
+        self.assertIn("extra", accepts)
+        self.assertEqual(accepts["extra"]["name"], "USD Coin")
+        self.assertEqual(accepts["extra"]["version"], "2")
 
 
 # ──────────────────────────────────────────────────────────────────
