@@ -237,6 +237,21 @@ async def auth_and_metering(request: Request, call_next):
     )
     if payment_header:
         payment_method = "x402"
+
+        # Replay protection FIRST — always runs regardless of X402_VERIFY.
+        # Hash the raw header so even unverified payments can't be replayed.
+        import hashlib
+        sig_hash = hashlib.sha256(payment_header.encode()).hexdigest()
+        if is_signature_used(sig_hash):
+            logger.warning("x402 replay rejected: sig_hash=%s", sig_hash[:16])
+            log_call(tool_name, "x402:replay", status_code=402, client_ip=client_ip)
+            return JSONResponse(
+                status_code=402,
+                content={"error": "Payment signature already used (replay rejected)"},
+                headers={"Cache-Control": "no-store"},
+            )
+
+        payer = "unverified"
         if X402_VERIFY:
             verify_result = _verify_payment_locally(payment_header)
             if not verify_result["valid"]:
@@ -245,29 +260,18 @@ async def auth_and_metering(request: Request, call_next):
                 return JSONResponse(
                     status_code=402,
                     content={"error": f"Payment verification failed: {verify_result['reason']}"},
+                    headers={"Cache-Control": "no-store"},
                 )
+            payer = verify_result.get("payer", "unknown")
 
-            # Replay protection: hash the payment header and reject if already used
-            import hashlib
-            sig_hash = hashlib.sha256(payment_header.encode()).hexdigest()
-            if is_signature_used(sig_hash):
-                logger.warning("x402 replay rejected for payer %s", verify_result.get("payer"))
-                log_call(tool_name, "x402:replay", status_code=402, client_ip=client_ip)
-                return JSONResponse(
-                    status_code=402,
-                    content={"error": "Payment signature already used (replay rejected)"},
-                )
-            # Record the signature as used (expires after 10 minutes — well beyond typical validity window)
-            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-            expires_at = (_dt.now(_tz.utc) + _td(minutes=10)).isoformat()
-            record_signature(sig_hash, verify_result.get("payer", "unknown"), expires_at)
+        # Record the signature as used (expires after 10 minutes)
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        expires_at = (_dt.now(_tz.utc) + _td(minutes=10)).isoformat()
+        record_signature(sig_hash, payer, expires_at)
     else:
         # No payment — return 402
         log_call(tool_name, "none", status_code=402, client_ip=client_ip)
         return _build_402_response(path)
-
-    # Authorized — call endpoint
-    payer = verify_result.get("payer", "unknown") if X402_VERIFY else "unverified"
     response = await call_next(request)
 
     # Read the streaming response body so we can build a new Response with extra headers.
@@ -278,6 +282,10 @@ async def auth_and_metering(request: Request, call_next):
         body += chunk
 
     new_headers = dict(response.headers)
+    # Prevent proxy/CDN caching of paid responses — each request must hit the app
+    # so replay protection can check the signature against the used_signatures table.
+    new_headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    new_headers["Vary"] = "Payment-Signature"
 
     # Attach PAYMENT-RESPONSE header on successful paid responses (x402 v2 spec)
     if 200 <= response.status_code < 300:
