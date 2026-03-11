@@ -316,8 +316,14 @@ def api_stats():
 # ── Paid tool endpoints ──
 
 @app.get("/api/v1/stock_quote")
-def api_stock_quote(ticker: str = Query(..., description="Stock ticker (e.g. AAPL, TSLA)")):
+def api_stock_quote(
+    ticker: str = Query(None, description="Stock ticker (e.g. AAPL, TSLA)"),
+    symbol: str = Query(None, description="Alias for ticker"),
+):
     """Real-time stock price, volume, and change %."""
+    ticker = ticker or symbol
+    if not ticker:
+        return JSONResponse(status_code=422, content={"error": "Missing required parameter: ticker (or symbol)"})
     ticker = ticker.upper().strip()
     cached = stock_cache.get(f"stock:{ticker}")
     if cached is not None:
@@ -328,8 +334,14 @@ def api_stock_quote(ticker: str = Query(..., description="Stock ticker (e.g. AAP
 
 
 @app.get("/api/v1/company_fundamentals")
-def api_company_fundamentals(ticker: str = Query(..., description="Stock ticker (e.g. AAPL)")):
+def api_company_fundamentals(
+    ticker: str = Query(None, description="Stock ticker (e.g. AAPL)"),
+    symbol: str = Query(None, description="Alias for ticker"),
+):
     """Revenue, P/E, market cap, sector, beta, dividends, and company description."""
+    ticker = ticker or symbol
+    if not ticker:
+        return JSONResponse(status_code=422, content={"error": "Missing required parameter: ticker (or symbol)"})
     ticker = ticker.upper().strip()
     cached = fundamentals_cache.get(f"fundamentals:{ticker}")
     if cached is not None:
