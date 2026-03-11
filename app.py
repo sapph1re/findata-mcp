@@ -53,6 +53,12 @@ PAID_PREFIXES = ("/api/v1/stock_quote", "/api/v1/company_fundamentals",
                  "/api/v1/economic_indicator", "/api/v1/sec_filing",
                  "/api/v1/crypto_price")
 
+# In-memory replay protection — belt-and-suspenders alongside SQLite.
+# Catches replays even if SQLite file doesn't persist (e.g. ephemeral Railway storage).
+# Bounded to prevent unbounded growth; oldest entries evicted via dict ordering (Python 3.7+).
+_USED_SIGS_MEM: dict[str, float] = {}  # sig_hash → timestamp
+_USED_SIGS_MEM_MAX = 10000
+
 # ── Caches ──
 stock_cache = TTLCache(ttl_seconds=60)
 fundamentals_cache = TTLCache(ttl_seconds=3600)
@@ -240,9 +246,11 @@ async def auth_and_metering(request: Request, call_next):
 
         # Replay protection FIRST — always runs regardless of X402_VERIFY.
         # Hash the raw header so even unverified payments can't be replayed.
+        # Checks both in-memory dict (fast, survives within process) and SQLite
+        # (persistent across restarts when filesystem is durable).
         import hashlib
         sig_hash = hashlib.sha256(payment_header.encode()).hexdigest()
-        if is_signature_used(sig_hash):
+        if sig_hash in _USED_SIGS_MEM or is_signature_used(sig_hash):
             logger.warning("x402 replay rejected: sig_hash=%s", sig_hash[:16])
             log_call(tool_name, "x402:replay", status_code=402, client_ip=client_ip)
             return JSONResponse(
@@ -250,6 +258,25 @@ async def auth_and_metering(request: Request, call_next):
                 content={"error": "Payment signature already used (replay rejected)"},
                 headers={"Cache-Control": "no-store"},
             )
+
+        # Network tampering check — always runs regardless of X402_VERIFY.
+        # Reject if the payment payload claims a different network than our config.
+        try:
+            _raw = base64.b64decode(payment_header) if not payment_header.strip().startswith("{") else payment_header.encode()
+            _pdata = _json.loads(_raw)
+            # x402 v2: accepted.network must match
+            _accepted = _pdata.get("accepted", {})
+            _payload_network = _accepted.get("network", "")
+            if _payload_network and _payload_network != X402_NETWORK:
+                logger.warning("x402 network mismatch: payload=%s expected=%s", _payload_network, X402_NETWORK)
+                log_call(tool_name, "x402:network-mismatch", status_code=402, client_ip=client_ip)
+                return JSONResponse(
+                    status_code=402,
+                    content={"error": f"Network mismatch: payment is for {_payload_network}, server requires {X402_NETWORK}"},
+                    headers={"Cache-Control": "no-store"},
+                )
+        except Exception:
+            pass  # Parsing failures will be caught by _verify_payment_locally if verify is on
 
         payer = "unverified"
         if X402_VERIFY:
@@ -264,10 +291,15 @@ async def auth_and_metering(request: Request, call_next):
                 )
             payer = verify_result.get("payer", "unknown")
 
-        # Record the signature as used (expires after 10 minutes)
+        # Record the signature as used — both in-memory and SQLite (10 min expiry).
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
         expires_at = (_dt.now(_tz.utc) + _td(minutes=10)).isoformat()
         record_signature(sig_hash, payer, expires_at)
+        _USED_SIGS_MEM[sig_hash] = time.monotonic()
+        # Evict oldest entries if in-memory cache is too large
+        if len(_USED_SIGS_MEM) > _USED_SIGS_MEM_MAX:
+            oldest = next(iter(_USED_SIGS_MEM))
+            del _USED_SIGS_MEM[oldest]
     else:
         # No payment — return 402
         log_call(tool_name, "none", status_code=402, client_ip=client_ip)
@@ -287,18 +319,21 @@ async def auth_and_metering(request: Request, call_next):
     new_headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     new_headers["Vary"] = "Payment-Signature"
 
-    # Attach PAYMENT-RESPONSE header on successful paid responses (x402 v2 spec)
+    # Attach PAYMENT-RESPONSE header on successful paid responses (x402 v2 spec).
+    # Must include 'success', 'transaction', and 'network' fields for SettleResponse
+    # compatibility with the x402 Python SDK's get_payment_settle_response().
     if 200 <= response.status_code < 300:
         settlement = {
+            "success": True,
+            "transaction": sig_hash,
+            "network": X402_NETWORK,
             "x402Version": 2,
             "scheme": "exact",
-            "network": X402_NETWORK,
             "asset": X402_ASSET,
             "amount": X402_AMOUNT,
             "payTo": X402_WALLET,
             "payer": payer,
             "verification": "local-eip712" if X402_VERIFY else "none",
-            "settlement": "signature-verified",
         }
         encoded = base64.b64encode(_json.dumps(settlement).encode()).decode()
         new_headers["PAYMENT-RESPONSE"] = encoded

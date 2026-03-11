@@ -351,7 +351,7 @@ class TestAPIMiddleware(unittest.TestCase):
                 crypto_cache.clear()
                 resp = self.client.get(
                     "/api/v1/crypto_price?coin_id=bitcoin",
-                    headers={"X-PAYMENT": "test-pay"},
+                    headers={"X-PAYMENT": "test-pay-valid-base64"},
                 )
                 self.assertEqual(resp.status_code, 200)
                 import base64, json
@@ -362,6 +362,124 @@ class TestAPIMiddleware(unittest.TestCase):
                 self.assertEqual(data["amount"], app_mod.X402_AMOUNT)
         finally:
             app_mod.X402_VERIFY = original
+
+    def test_payment_response_has_settle_response_fields(self):
+        """PAYMENT-RESPONSE includes success, transaction, network for SettleResponse compat."""
+        from unittest.mock import patch
+        import app as app_mod
+        original = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = False
+        try:
+            with patch("app.get_stock_quote") as mock_fn:
+                mock_fn.return_value = {"ticker": "GOOG", "price": 175.0}
+                from app import stock_cache
+                stock_cache.clear()
+                resp = self.client.get(
+                    "/api/v1/stock_quote?ticker=GOOG",
+                    headers={"PAYMENT-SIGNATURE": "test-settle-fields-sig"},
+                )
+                self.assertEqual(resp.status_code, 200)
+                import base64, json
+                data = json.loads(base64.b64decode(resp.headers["payment-response"]))
+                # Required SettleResponse fields
+                self.assertIn("success", data)
+                self.assertTrue(data["success"])
+                self.assertIn("transaction", data)
+                self.assertIsInstance(data["transaction"], str)
+                self.assertTrue(len(data["transaction"]) > 0)
+                self.assertIn("network", data)
+                self.assertEqual(data["network"], app_mod.X402_NETWORK)
+        finally:
+            app_mod.X402_VERIFY = original
+
+    def test_network_tampering_rejected(self):
+        """Payment with mismatched network in payload is rejected."""
+        import base64, json
+        import app as app_mod
+        original = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = False
+        try:
+            # Build a fake x402 v2 payment payload with wrong network
+            fake_payload = {
+                "x402Version": 2,
+                "accepted": {
+                    "scheme": "exact",
+                    "network": "eip155:1",  # Ethereum mainnet — wrong!
+                    "asset": app_mod.X402_ASSET,
+                    "amount": app_mod.X402_AMOUNT,
+                    "payTo": app_mod.X402_WALLET,
+                    "maxTimeoutSeconds": 300,
+                },
+                "payload": {"signature": "0xfake"},
+            }
+            encoded = base64.b64encode(json.dumps(fake_payload).encode()).decode()
+            resp = self.client.get(
+                "/api/v1/stock_quote?ticker=AAPL",
+                headers={"PAYMENT-SIGNATURE": encoded},
+            )
+            self.assertEqual(resp.status_code, 402)
+            self.assertIn("network mismatch", resp.json().get("error", "").lower())
+        finally:
+            app_mod.X402_VERIFY = original
+
+    def test_correct_network_accepted(self):
+        """Payment with correct network passes network check (still needs valid sig or verify=false)."""
+        import base64, json
+        from unittest.mock import patch
+        import app as app_mod
+        original = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = False
+        try:
+            fake_payload = {
+                "x402Version": 2,
+                "accepted": {
+                    "scheme": "exact",
+                    "network": app_mod.X402_NETWORK,  # correct
+                    "asset": app_mod.X402_ASSET,
+                    "amount": app_mod.X402_AMOUNT,
+                    "payTo": app_mod.X402_WALLET,
+                    "maxTimeoutSeconds": 300,
+                },
+                "payload": {"signature": "0xfake"},
+            }
+            encoded = base64.b64encode(json.dumps(fake_payload).encode()).decode()
+            with patch("app.get_stock_quote") as mock_fn:
+                mock_fn.return_value = {"ticker": "AAPL", "price": 185.50}
+                from app import stock_cache
+                stock_cache.clear()
+                resp = self.client.get(
+                    "/api/v1/stock_quote?ticker=AAPL",
+                    headers={"PAYMENT-SIGNATURE": encoded},
+                )
+                self.assertEqual(resp.status_code, 200)
+        finally:
+            app_mod.X402_VERIFY = original
+
+    def test_replay_caught_by_memory_cache(self):
+        """In-memory replay cache catches replays even without SQLite lookup."""
+        import app as app_mod
+        import hashlib
+
+        original_verify = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = False
+        try:
+            sig = "unique-memory-replay-test-sig"
+            sig_hash = hashlib.sha256(sig.encode()).hexdigest()
+
+            # Manually inject into in-memory cache
+            app_mod._USED_SIGS_MEM[sig_hash] = 0
+
+            resp = self.client.get(
+                "/api/v1/stock_quote?ticker=AAPL",
+                headers={"PAYMENT-SIGNATURE": sig},
+            )
+            self.assertEqual(resp.status_code, 402)
+            self.assertIn("replay", resp.json().get("error", "").lower())
+
+            # Cleanup
+            del app_mod._USED_SIGS_MEM[sig_hash]
+        finally:
+            app_mod.X402_VERIFY = original_verify
 
     def test_402_includes_eip712_domain(self):
         """402 response includes EIP-712 domain params (name, version) in extra."""
@@ -520,6 +638,7 @@ class TestReplayProtection(unittest.TestCase):
                 self.assertIn("replay", resp2.json().get("error", "").lower())
         finally:
             app_mod.X402_VERIFY = original_verify
+
 
 
 def tearDownModule():
