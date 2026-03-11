@@ -19,7 +19,7 @@ def _get_db() -> sqlite3.Connection:
 
 
 def init_metering_db() -> None:
-    """Create metering table if it doesn't exist."""
+    """Create metering and replay-protection tables if they don't exist."""
     conn = _get_db()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS metering (
@@ -32,6 +32,48 @@ def init_metering_db() -> None:
             client_ip TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS used_signatures (
+            signature_hash TEXT PRIMARY KEY,
+            payer TEXT NOT NULL,
+            used_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def is_signature_used(signature_hash: str) -> bool:
+    """Check if a payment signature has already been used."""
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT 1 FROM used_signatures WHERE signature_hash = ?",
+        (signature_hash,),
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def record_signature(signature_hash: str, payer: str, expires_at: str) -> None:
+    """Record a payment signature as used."""
+    conn = _get_db()
+    conn.execute(
+        "INSERT OR IGNORE INTO used_signatures (signature_hash, payer, used_at, expires_at) "
+        "VALUES (?, ?, ?, ?)",
+        (signature_hash, payer, datetime.now(timezone.utc).isoformat(), expires_at),
+    )
+    conn.commit()
+    conn.close()
+
+
+def purge_expired_signatures() -> None:
+    """Remove expired signatures to prevent unbounded table growth."""
+    conn = _get_db()
+    conn.execute(
+        "DELETE FROM used_signatures WHERE expires_at < ?",
+        (datetime.now(timezone.utc).isoformat(),),
+    )
     conn.commit()
     conn.close()
 

@@ -17,7 +17,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.responses import Response
 
-from metering import init_metering_db, log_call
+from metering import init_metering_db, log_call, is_signature_used, record_signature, purge_expired_signatures
 from cache import TTLCache
 from tools.stock_quote import get_stock_quote
 from tools.company_fundamentals import get_company_fundamentals
@@ -79,6 +79,7 @@ def _error_response(result: dict) -> JSONResponse | None:
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     init_metering_db()
+    purge_expired_signatures()
     logger.info("FinData MCP started — x402 network=%s, verify=%s", X402_NETWORK, X402_VERIFY)
     yield
 
@@ -245,6 +246,21 @@ async def auth_and_metering(request: Request, call_next):
                     status_code=402,
                     content={"error": f"Payment verification failed: {verify_result['reason']}"},
                 )
+
+            # Replay protection: hash the payment header and reject if already used
+            import hashlib
+            sig_hash = hashlib.sha256(payment_header.encode()).hexdigest()
+            if is_signature_used(sig_hash):
+                logger.warning("x402 replay rejected for payer %s", verify_result.get("payer"))
+                log_call(tool_name, "x402:replay", status_code=402, client_ip=client_ip)
+                return JSONResponse(
+                    status_code=402,
+                    content={"error": "Payment signature already used (replay rejected)"},
+                )
+            # Record the signature as used (expires after 10 minutes — well beyond typical validity window)
+            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+            expires_at = (_dt.now(_tz.utc) + _td(minutes=10)).isoformat()
+            record_signature(sig_hash, verify_result.get("payer", "unknown"), expires_at)
     else:
         # No payment — return 402
         log_call(tool_name, "none", status_code=402, client_ip=client_ip)

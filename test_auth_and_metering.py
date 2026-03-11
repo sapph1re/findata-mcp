@@ -14,7 +14,7 @@ os.environ["FINDATA_DB_PATH"] = TEST_DB_PATH
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from metering import init_metering_db, log_call, get_usage_stats
+from metering import init_metering_db, log_call, get_usage_stats, is_signature_used, record_signature, purge_expired_signatures
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -443,6 +443,83 @@ class TestSymbolResolution(unittest.TestCase):
     def test_whitespace_handled(self):
         from tools.crypto_price import resolve_coin_id
         self.assertEqual(resolve_coin_id("  BTC  "), "bitcoin")
+
+
+class TestReplayProtection(unittest.TestCase):
+    """Tests for x402 payment signature replay protection."""
+
+    @classmethod
+    def setUpClass(cls):
+        init_metering_db()
+
+    def setUp(self):
+        conn = sqlite3.connect(TEST_DB_PATH)
+        conn.execute("DELETE FROM used_signatures")
+        conn.commit()
+        conn.close()
+
+    def test_signature_not_used_initially(self):
+        self.assertFalse(is_signature_used("abc123hash"))
+
+    def test_signature_recorded_and_detected(self):
+        record_signature("abc123hash", "0xPayer", "2099-01-01T00:00:00+00:00")
+        self.assertTrue(is_signature_used("abc123hash"))
+
+    def test_different_signature_not_affected(self):
+        record_signature("sig_a", "0xPayer", "2099-01-01T00:00:00+00:00")
+        self.assertFalse(is_signature_used("sig_b"))
+
+    def test_purge_removes_expired(self):
+        record_signature("old_sig", "0xPayer", "2020-01-01T00:00:00+00:00")
+        record_signature("future_sig", "0xPayer", "2099-01-01T00:00:00+00:00")
+        purge_expired_signatures()
+        self.assertFalse(is_signature_used("old_sig"))
+        self.assertTrue(is_signature_used("future_sig"))
+
+    def test_duplicate_insert_ignored(self):
+        """OR IGNORE prevents errors on duplicate signature hash."""
+        record_signature("dup_sig", "0xPayer", "2099-01-01T00:00:00+00:00")
+        record_signature("dup_sig", "0xPayer", "2099-01-01T00:00:00+00:00")
+        self.assertTrue(is_signature_used("dup_sig"))
+
+    def test_replay_rejected_via_middleware(self):
+        """Same payment header used twice: first 200, second 402 (replay rejected)."""
+        from unittest.mock import patch
+        import app as app_mod
+        from starlette.testclient import TestClient
+
+        original_verify = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = True
+
+        try:
+            mock_result = {"valid": True, "payer": "0xTestPayer"}
+
+            with patch("app.get_stock_quote") as mock_fn, \
+                 patch("app._verify_payment_locally", return_value=mock_result) as mock_verify:
+                mock_fn.return_value = {"ticker": "AAPL", "price": 185.50}
+                from app import stock_cache
+                stock_cache.clear()
+
+                client = TestClient(app_mod.app)
+
+                # First request — should succeed
+                resp1 = client.get(
+                    "/api/v1/stock_quote?ticker=AAPL",
+                    headers={"PAYMENT-SIGNATURE": "unique-payment-sig-001"},
+                )
+                self.assertEqual(resp1.status_code, 200)
+
+                stock_cache.clear()
+
+                # Second request with same signature — should be rejected
+                resp2 = client.get(
+                    "/api/v1/stock_quote?ticker=AAPL",
+                    headers={"PAYMENT-SIGNATURE": "unique-payment-sig-001"},
+                )
+                self.assertEqual(resp2.status_code, 402)
+                self.assertIn("replay", resp2.json().get("error", "").lower())
+        finally:
+            app_mod.X402_VERIFY = original_verify
 
 
 def tearDownModule():
