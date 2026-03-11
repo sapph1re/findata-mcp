@@ -23,6 +23,30 @@ COMMON_SERIES = {
     "M2SL": "M2 Money Supply",
 }
 
+# Map friendly aliases to FRED series IDs
+INDICATOR_ALIASES: dict[str, str] = {
+    "CPI": "CPIAUCSL",
+    "INFLATION": "CPIAUCSL",
+    "UNEMPLOYMENT": "UNRATE",
+    "JOBS": "UNRATE",
+    "INTEREST_RATE": "FEDFUNDS",
+    "FED_RATE": "FEDFUNDS",
+    "FED_FUNDS": "FEDFUNDS",
+    "TREASURY_10Y": "DGS10",
+    "TREASURY_2Y": "DGS2",
+    "YIELD_CURVE": "T10Y2Y",
+    "MORTGAGE": "MORTGAGE30US",
+    "VIX": "VIXCLS",
+    "MONEY_SUPPLY": "M2SL",
+    "M2": "M2SL",
+}
+
+
+def resolve_series_id(raw: str) -> str:
+    """Resolve a friendly alias to a FRED series ID, or pass through."""
+    normalized = raw.strip().upper()
+    return INDICATOR_ALIASES.get(normalized, normalized)
+
 
 def get_economic_indicator(series_id: str) -> dict[str, Any]:
     """Fetch economic indicator data from FRED."""

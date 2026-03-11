@@ -378,6 +378,49 @@ class TestAPIMiddleware(unittest.TestCase):
 # Cleanup
 # ──────────────────────────────────────────────────────────────────
 
+class TestIndicatorResolution(unittest.TestCase):
+    """Tests for economic_indicator alias resolution."""
+
+    def test_known_aliases_resolve(self):
+        from tools.economic_indicator import resolve_series_id
+        self.assertEqual(resolve_series_id("CPI"), "CPIAUCSL")
+        self.assertEqual(resolve_series_id("UNEMPLOYMENT"), "UNRATE")
+        self.assertEqual(resolve_series_id("inflation"), "CPIAUCSL")
+        self.assertEqual(resolve_series_id("INTEREST_RATE"), "FEDFUNDS")
+
+    def test_real_series_ids_pass_through(self):
+        from tools.economic_indicator import resolve_series_id
+        self.assertEqual(resolve_series_id("GDP"), "GDP")
+        self.assertEqual(resolve_series_id("CPIAUCSL"), "CPIAUCSL")
+
+    def test_unknown_passes_through(self):
+        from tools.economic_indicator import resolve_series_id
+        self.assertEqual(resolve_series_id("NOTREAL"), "NOTREAL")
+
+
+class TestErrorResponseHelper(unittest.TestCase):
+    """Tests for _error_response mapping errors to HTTP status codes."""
+
+    def test_not_found_returns_404(self):
+        from app import _error_response
+        resp = _error_response({"error": "Ticker 'XYZ' not found", "ticker": "XYZ"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_rate_limit_returns_429(self):
+        from app import _error_response
+        resp = _error_response({"error": "CoinGecko rate limit exceeded"})
+        self.assertEqual(resp.status_code, 429)
+
+    def test_no_error_returns_none(self):
+        from app import _error_response
+        self.assertIsNone(_error_response({"data": "ok"}))
+
+    def test_generic_error_returns_502(self):
+        from app import _error_response
+        resp = _error_response({"error": "Connection timeout"})
+        self.assertEqual(resp.status_code, 502)
+
+
 class TestSymbolResolution(unittest.TestCase):
     """Tests for crypto_price symbol → CoinGecko ID resolution."""
 

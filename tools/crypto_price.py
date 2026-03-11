@@ -1,6 +1,7 @@
 """crypto_price tool — price, market cap, volume, sparkline via CoinGecko API."""
 
 import time
+import threading
 from typing import Any
 
 import requests
@@ -61,8 +62,31 @@ def resolve_coin_id(raw: str) -> str:
     return SYMBOL_TO_COINGECKO_ID.get(normalized, normalized)
 
 
+# Simple rate limiter: max 25 requests per 60 seconds (CoinGecko free tier = 30/min)
+_rate_lock = threading.Lock()
+_request_times: list[float] = []
+_RATE_LIMIT = 25
+_RATE_WINDOW = 60.0
+
+
+def _check_rate_limit() -> bool:
+    """Return True if request is allowed, False if rate limited."""
+    now = time.time()
+    with _rate_lock:
+        _request_times[:] = [t for t in _request_times if now - t < _RATE_WINDOW]
+        if len(_request_times) >= _RATE_LIMIT:
+            return False
+        _request_times.append(now)
+        return True
+
+
 def get_crypto_price(coin_id: str) -> dict[str, Any]:
     """Fetch cryptocurrency price data from CoinGecko."""
+    if not _check_rate_limit():
+        return {
+            "error": "CoinGecko rate limit exceeded (30 req/min). Try again shortly.",
+            "coin_id": coin_id,
+        }
     try:
         resp = requests.get(
             f"{COINGECKO_BASE}/coins/{coin_id}",

@@ -68,7 +68,7 @@ def _get_filing_url(cik: str, form_type: str) -> dict[str, Any] | None:
     return None
 
 
-def _fetch_filing_text(url: str, max_chars: int = 50000) -> str:
+def _fetch_filing_text(url: str, max_chars: int = 10000) -> str:
     """Fetch filing document text, truncated to max_chars."""
     try:
         resp = requests.get(url, headers=HEADERS, timeout=30)

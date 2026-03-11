@@ -21,7 +21,7 @@ from metering import init_metering_db, log_call
 from cache import TTLCache
 from tools.stock_quote import get_stock_quote
 from tools.company_fundamentals import get_company_fundamentals
-from tools.economic_indicator import get_economic_indicator
+from tools.economic_indicator import get_economic_indicator, resolve_series_id
 from tools.sec_filing import get_sec_filing
 from tools.crypto_price import get_crypto_price, resolve_coin_id
 
@@ -59,6 +59,20 @@ fundamentals_cache = TTLCache(ttl_seconds=3600)
 economic_cache = TTLCache(ttl_seconds=21600)
 sec_cache = TTLCache(ttl_seconds=86400)
 crypto_cache = TTLCache(ttl_seconds=60)
+
+def _error_response(result: dict) -> JSONResponse | None:
+    """If result contains an error, return a JSONResponse with proper status code."""
+    if "error" not in result:
+        return None
+    err = result["error"].lower()
+    if "not found" in err or "could not resolve" in err:
+        return JSONResponse(status_code=404, content=result)
+    if "rate limit" in err:
+        return JSONResponse(status_code=429, content=result)
+    if "not set" in err or "api_key" in err:
+        return JSONResponse(status_code=503, content=result)
+    return JSONResponse(status_code=502, content=result)
+
 
 # ── App ──
 
@@ -329,6 +343,9 @@ def api_stock_quote(
     if cached is not None:
         return cached
     result = get_stock_quote(ticker)
+    err = _error_response(result)
+    if err:
+        return err
     stock_cache.set(f"stock:{ticker}", result)
     return result
 
@@ -347,6 +364,9 @@ def api_company_fundamentals(
     if cached is not None:
         return cached
     result = get_company_fundamentals(ticker)
+    err = _error_response(result)
+    if err:
+        return err
     fundamentals_cache.set(f"fundamentals:{ticker}", result)
     return result
 
@@ -360,11 +380,14 @@ def api_economic_indicator(
     series_id = series_id or indicator
     if not series_id:
         return JSONResponse(status_code=422, content={"error": "Missing required parameter: series_id (or indicator)"})
-    series_id = series_id.upper().strip()
+    series_id = resolve_series_id(series_id)
     cached = economic_cache.get(f"econ:{series_id}")
     if cached is not None:
         return cached
     result = get_economic_indicator(series_id)
+    err = _error_response(result)
+    if err:
+        return err
     economic_cache.set(f"econ:{series_id}", result)
     return result
 
@@ -386,6 +409,9 @@ def api_sec_filing(
     if cached is not None:
         return cached
     result = get_sec_filing(ticker_or_cik, form_type)
+    err = _error_response(result)
+    if err:
+        return err
     sec_cache.set(cache_key, result)
     return result
 
@@ -404,7 +430,8 @@ def api_crypto_price(
     if cached is not None:
         return cached
     result = get_crypto_price(coin_id)
-    if "error" in result and "not found" in result["error"].lower():
-        return JSONResponse(status_code=404, content=result)
+    err = _error_response(result)
+    if err:
+        return err
     crypto_cache.set(f"crypto:{coin_id}", result)
     return result
