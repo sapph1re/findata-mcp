@@ -9,6 +9,7 @@ Run: uvicorn app:app --host 0.0.0.0 --port 8080
 import os
 import time
 import logging
+import asyncio
 import base64
 import json as _json
 from contextlib import asynccontextmanager
@@ -84,6 +85,12 @@ PAID_PREFIXES = ("/api/v1/stock_quote", "/api/v1/company_fundamentals",
 # Bounded to prevent unbounded growth; oldest entries evicted via dict ordering (Python 3.7+).
 _USED_SIGS_MEM: dict[str, float] = {}  # sig_hash → timestamp
 _USED_SIGS_MEM_MAX = 10000
+
+# Serialize on-chain settlements so nonces don't collide when requests arrive
+# faster than Base block time (~2s).  The lock is asyncio-based; the blocking
+# settle() call runs in a thread via asyncio.to_thread so the event loop stays
+# responsive for health checks and other non-paid routes.
+_settlement_lock = asyncio.Lock()
 
 # ── Caches ──
 stock_cache = TTLCache(ttl_seconds=60)
@@ -360,7 +367,9 @@ async def auth_and_metering(request: Request, call_next):
         settle_result = None  # Will hold SettleResponse if on-chain settlement succeeds
 
         if _settle_scheme:
-            # On-chain settlement: verify + submit transferWithAuthorization
+            # On-chain settlement: verify + submit transferWithAuthorization.
+            # Serialized via _settlement_lock so two rapid requests don't race
+            # on the facilitator nonce (Base blocks are ~2s).
             try:
                 from x402.schemas import PaymentRequirements
                 from x402.schemas.helpers import parse_payment_payload
@@ -376,15 +385,21 @@ async def auth_and_metering(request: Request, call_next):
                     max_timeout_seconds=300,
                     extra={"name": X402_TOKEN_NAME, "version": X402_TOKEN_VERSION},
                 )
-                settle_result = _settle_scheme.settle(pay_payload, pay_requirements)
+
+                async with _settlement_lock:
+                    settle_result = await asyncio.to_thread(
+                        _settle_scheme.settle, pay_payload, pay_requirements
+                    )
+
                 if not settle_result.success:
                     reason = settle_result.error_reason or "unknown"
                     msg = settle_result.error_message or ""
-                    logger.warning("x402 settlement failed: %s %s", reason, msg)
+                    logger.warning("x402 settlement failed: %s (%s)", reason, msg)
                     log_call(tool_name, "x402:failed", status_code=402, client_ip=client_ip)
+                    # Sanitize: never expose raw RPC/node error details to clients
                     return JSONResponse(
                         status_code=402,
-                        content={"error": f"Payment settlement failed: {reason}" + (f" ({msg})" if msg else "")},
+                        content={"error": f"Payment settlement failed: {reason}"},
                         headers={"Cache-Control": "no-store", "PAYMENT-REQUIRED": _payment_required_header(path)},
                     )
                 payer = settle_result.payer or "unknown"
@@ -394,7 +409,7 @@ async def auth_and_metering(request: Request, call_next):
                 log_call(tool_name, "x402:failed", status_code=402, client_ip=client_ip)
                 return JSONResponse(
                     status_code=402,
-                    content={"error": f"Payment settlement error: {e}"},
+                    content={"error": "Payment settlement error: please retry"},
                     headers={"Cache-Control": "no-store", "PAYMENT-REQUIRED": _payment_required_header(path)},
                 )
         elif X402_VERIFY:
