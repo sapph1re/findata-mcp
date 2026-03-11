@@ -303,6 +303,66 @@ class TestAPIMiddleware(unittest.TestCase):
         finally:
             app_mod.X402_VERIFY = original
 
+    # ── PAYMENT-RESPONSE header tests (Task 99) ──
+
+    def test_payment_response_header_present_on_200(self):
+        """Successful paid response includes PAYMENT-RESPONSE header (x402 v2)."""
+        from unittest.mock import patch
+        import app as app_mod
+        original = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = False
+        try:
+            with patch("app.get_stock_quote") as mock_fn:
+                mock_fn.return_value = {"ticker": "AAPL", "price": 185.50}
+                from app import stock_cache
+                stock_cache.clear()
+                resp = self.client.get(
+                    "/api/v1/stock_quote?ticker=AAPL",
+                    headers={"PAYMENT-SIGNATURE": "test-sig"},
+                )
+                self.assertEqual(resp.status_code, 200)
+                self.assertIn("payment-response", resp.headers)
+                import base64, json
+                decoded = json.loads(base64.b64decode(resp.headers["payment-response"]))
+                self.assertEqual(decoded["x402Version"], 2)
+                self.assertEqual(decoded["scheme"], "exact")
+                self.assertIn("network", decoded)
+                self.assertIn("payTo", decoded)
+                self.assertIn("payer", decoded)
+        finally:
+            app_mod.X402_VERIFY = original
+
+    def test_payment_response_header_absent_on_402(self):
+        """402 responses should NOT include PAYMENT-RESPONSE header."""
+        resp = self.client.get("/api/v1/stock_quote?ticker=AAPL")
+        self.assertEqual(resp.status_code, 402)
+        self.assertNotIn("payment-response", resp.headers)
+
+    def test_payment_response_header_valid_base64_json(self):
+        """PAYMENT-RESPONSE header value is valid base64-encoded JSON."""
+        from unittest.mock import patch
+        import app as app_mod
+        original = app_mod.X402_VERIFY
+        app_mod.X402_VERIFY = False
+        try:
+            with patch("app.get_crypto_price") as mock_fn:
+                mock_fn.return_value = {"coin": "bitcoin", "price": 95000}
+                from app import crypto_cache
+                crypto_cache.clear()
+                resp = self.client.get(
+                    "/api/v1/crypto_price?coin_id=bitcoin",
+                    headers={"X-PAYMENT": "test-pay"},
+                )
+                self.assertEqual(resp.status_code, 200)
+                import base64, json
+                raw = resp.headers["payment-response"]
+                decoded = base64.b64decode(raw)
+                data = json.loads(decoded)
+                self.assertIsInstance(data, dict)
+                self.assertEqual(data["amount"], app_mod.X402_AMOUNT)
+        finally:
+            app_mod.X402_VERIFY = original
+
     def test_402_includes_eip712_domain(self):
         """402 response includes EIP-712 domain params (name, version) in extra."""
         resp = self.client.get("/api/v1/stock_quote?ticker=AAPL")

@@ -236,7 +236,24 @@ async def auth_and_metering(request: Request, call_next):
         return _build_402_response(path)
 
     # Authorized — call endpoint
+    payer = verify_result.get("payer", "unknown") if X402_VERIFY else "unverified"
     response = await call_next(request)
+
+    # Attach PAYMENT-RESPONSE header on successful paid responses (x402 v2 spec)
+    if 200 <= response.status_code < 300:
+        settlement = {
+            "x402Version": 2,
+            "scheme": "exact",
+            "network": X402_NETWORK,
+            "asset": X402_ASSET,
+            "amount": X402_AMOUNT,
+            "payTo": X402_WALLET,
+            "payer": payer,
+            "verification": "local-eip712" if X402_VERIFY else "none",
+            "settlement": "signature-verified",
+        }
+        encoded = base64.b64encode(_json.dumps(settlement).encode()).decode()
+        response.headers["PAYMENT-RESPONSE"] = encoded
 
     elapsed_ms = (time.monotonic() - start) * 1000
     log_call(
