@@ -88,6 +88,7 @@ class TestAPIMiddleware(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        init_metering_db()
         from fastapi.testclient import TestClient
         from app import app
         cls.client = TestClient(app)
