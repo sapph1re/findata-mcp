@@ -67,6 +67,26 @@ def record_signature(signature_hash: str, payer: str, expires_at: str) -> None:
     conn.close()
 
 
+def try_claim_signature(signature_hash: str, expires_at: str) -> bool:
+    """Atomically claim a signature. Returns True if newly claimed, False if already used.
+
+    Uses INSERT OR IGNORE + cursor.rowcount so that two concurrent workers racing on
+    the same signature will have exactly one succeed (rowcount=1) and the other see
+    rowcount=0 (the IGNORE fired because the PRIMARY KEY already existed).
+    """
+    conn = _get_db()
+    conn.execute("PRAGMA busy_timeout = 5000")
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO used_signatures (signature_hash, payer, used_at, expires_at) "
+        "VALUES (?, ?, ?, ?)",
+        (signature_hash, "pending", datetime.now(timezone.utc).isoformat(), expires_at),
+    )
+    row_added = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return row_added
+
+
 def purge_expired_signatures() -> None:
     """Remove expired signatures to prevent unbounded table growth."""
     conn = _get_db()

@@ -17,7 +17,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.responses import Response
 
-from metering import init_metering_db, log_call, is_signature_used, record_signature, purge_expired_signatures
+from metering import init_metering_db, log_call, is_signature_used, record_signature, purge_expired_signatures, try_claim_signature
 from cache import TTLCache
 from tools.stock_quote import get_stock_quote
 from tools.company_fundamentals import get_company_fundamentals
@@ -273,18 +273,39 @@ async def auth_and_metering(request: Request, call_next):
 
         # Replay protection FIRST — always runs regardless of X402_VERIFY.
         # Hash the raw header so even unverified payments can't be replayed.
-        # Checks both in-memory dict (fast, survives within process) and SQLite
-        # (persistent across restarts when filesystem is durable).
         import hashlib
         sig_hash = hashlib.sha256(payment_header.encode()).hexdigest()
-        if sig_hash in _USED_SIGS_MEM or is_signature_used(sig_hash):
-            logger.warning("x402 replay rejected: sig_hash=%s", sig_hash[:16])
+
+        # Fast-path: in-memory check (per-worker, no I/O)
+        if sig_hash in _USED_SIGS_MEM:
+            logger.warning("x402 replay rejected (mem): sig_hash=%s", sig_hash[:16])
             log_call(tool_name, "x402:replay", status_code=402, client_ip=client_ip)
             return JSONResponse(
                 status_code=402,
                 content={"error": "Payment signature already used (replay rejected)"},
                 headers={"Cache-Control": "no-store", "PAYMENT-REQUIRED": _payment_required_header(path)},
             )
+
+        # Atomic claim in SQLite — INSERT OR IGNORE + rowcount.
+        # With --workers 2, two workers racing on the same signature will have
+        # exactly one succeed (rowcount=1) and the other get rowcount=0.
+        # Claim happens BEFORE verification to eliminate the TOCTOU gap.
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        expires_at = (_dt.now(_tz.utc) + _td(minutes=10)).isoformat()
+        if not try_claim_signature(sig_hash, expires_at):
+            logger.warning("x402 replay rejected (db): sig_hash=%s", sig_hash[:16])
+            log_call(tool_name, "x402:replay", status_code=402, client_ip=client_ip)
+            return JSONResponse(
+                status_code=402,
+                content={"error": "Payment signature already used (replay rejected)"},
+                headers={"Cache-Control": "no-store", "PAYMENT-REQUIRED": _payment_required_header(path)},
+            )
+
+        # Signature claimed — record in memory for fast-path on this worker
+        _USED_SIGS_MEM[sig_hash] = time.monotonic()
+        if len(_USED_SIGS_MEM) > _USED_SIGS_MEM_MAX:
+            oldest = next(iter(_USED_SIGS_MEM))
+            del _USED_SIGS_MEM[oldest]
 
         # Network tampering check — always runs regardless of X402_VERIFY.
         # Reject if the payment payload claims a different network than our config.
@@ -318,15 +339,13 @@ async def auth_and_metering(request: Request, call_next):
                 )
             payer = verify_result.get("payer", "unknown")
 
-        # Record the signature as used — both in-memory and SQLite (10 min expiry).
-        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-        expires_at = (_dt.now(_tz.utc) + _td(minutes=10)).isoformat()
-        record_signature(sig_hash, payer, expires_at)
-        _USED_SIGS_MEM[sig_hash] = time.monotonic()
-        # Evict oldest entries if in-memory cache is too large
-        if len(_USED_SIGS_MEM) > _USED_SIGS_MEM_MAX:
-            oldest = next(iter(_USED_SIGS_MEM))
-            del _USED_SIGS_MEM[oldest]
+        # Update the claimed signature with actual payer identity
+        if payer not in ("pending", "unverified"):
+            from metering import _get_db
+            conn = _get_db()
+            conn.execute("UPDATE used_signatures SET payer = ? WHERE signature_hash = ?", (payer, sig_hash))
+            conn.commit()
+            conn.close()
     else:
         # No payment — return 402
         log_call(tool_name, "none", status_code=402, client_ip=client_ip)
