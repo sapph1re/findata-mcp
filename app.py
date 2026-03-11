@@ -110,6 +110,33 @@ def _is_paid_route(path: str) -> bool:
     return any(path.startswith(p) for p in PAID_PREFIXES)
 
 
+def _payment_required_header(path: str) -> str:
+    """Return the base64-encoded PAYMENT-REQUIRED header value for a path."""
+    from x402.schemas import PaymentRequired, PaymentRequirements, ResourceInfo
+    payment_required = PaymentRequired(
+        x402_version=2,
+        accepts=[
+            PaymentRequirements(
+                scheme="exact",
+                network=X402_NETWORK,
+                asset=X402_ASSET,
+                amount=X402_AMOUNT,
+                pay_to=X402_WALLET,
+                max_timeout_seconds=300,
+                extra={"name": X402_TOKEN_NAME, "version": X402_TOKEN_VERSION},
+            )
+        ],
+        resource=ResourceInfo(
+            url=path,
+            description=f"FinData API: {_extract_tool_name(path)}",
+            mime_type="application/json",
+        ),
+        error="Payment required",
+    )
+    body = payment_required.model_dump(by_alias=True, exclude_none=True)
+    return base64.b64encode(_json.dumps(body).encode()).decode()
+
+
 def _build_402_response(path: str) -> JSONResponse:
     """Build HTTP 402 Payment Required response per x402 v2 spec."""
     from x402.schemas import PaymentRequired, PaymentRequirements, ResourceInfo
@@ -256,7 +283,7 @@ async def auth_and_metering(request: Request, call_next):
             return JSONResponse(
                 status_code=402,
                 content={"error": "Payment signature already used (replay rejected)"},
-                headers={"Cache-Control": "no-store"},
+                headers={"Cache-Control": "no-store", "PAYMENT-REQUIRED": _payment_required_header(path)},
             )
 
         # Network tampering check — always runs regardless of X402_VERIFY.
@@ -273,7 +300,7 @@ async def auth_and_metering(request: Request, call_next):
                 return JSONResponse(
                     status_code=402,
                     content={"error": f"Network mismatch: payment is for {_payload_network}, server requires {X402_NETWORK}"},
-                    headers={"Cache-Control": "no-store"},
+                    headers={"Cache-Control": "no-store", "PAYMENT-REQUIRED": _payment_required_header(path)},
                 )
         except Exception:
             pass  # Parsing failures will be caught by _verify_payment_locally if verify is on
@@ -287,7 +314,7 @@ async def auth_and_metering(request: Request, call_next):
                 return JSONResponse(
                     status_code=402,
                     content={"error": f"Payment verification failed: {verify_result['reason']}"},
-                    headers={"Cache-Control": "no-store"},
+                    headers={"Cache-Control": "no-store", "PAYMENT-REQUIRED": _payment_required_header(path)},
                 )
             payer = verify_result.get("payer", "unknown")
 
