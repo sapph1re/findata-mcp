@@ -1,6 +1,9 @@
 """sec_filing tool — 10-K, 10-Q, 8-K full text via SEC EDGAR API."""
 
+import re
 import time
+from html.parser import HTMLParser
+from io import StringIO
 from typing import Any
 
 import requests
@@ -68,43 +71,93 @@ def _get_filing_url(cik: str, form_type: str) -> dict[str, Any] | None:
     return None
 
 
+class _FilingStripper(HTMLParser):
+    """HTML/XBRL-aware stripper that removes noise from SEC filings."""
+
+    # Tags whose entire content (including nested tags) should be skipped
+    SKIP_TAGS = frozenset({
+        "script", "style", "head",
+        # XBRL metadata blocks — pure noise (context definitions, unit defs, hidden facts)
+        "ix:header", "ix:hidden", "ix:references",
+    })
+
+    # Block-level tags that should insert a newline when opened
+    BLOCK_TAGS = frozenset({
+        "p", "div", "br", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+        "table", "section", "article", "header", "footer",
+    })
+
+    def __init__(self):
+        super().__init__()
+        self.result = StringIO()
+        self._skip_depth = 0  # nesting depth inside skip tags
+
+    def _tag_name(self, tag: str) -> str:
+        """Normalize tag name (handles ix:nonFraction → ix:nonfraction already by HTMLParser)."""
+        return tag.lower()
+
+    def handle_starttag(self, tag, attrs):
+        t = self._tag_name(tag)
+        if t in self.SKIP_TAGS:
+            self._skip_depth += 1
+        elif self._skip_depth == 0 and t in self.BLOCK_TAGS:
+            self.result.write("\n")
+
+    def handle_endtag(self, tag):
+        t = self._tag_name(tag)
+        if t in self.SKIP_TAGS and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data):
+        if self._skip_depth == 0:
+            self.result.write(data)
+
+
+def _clean_text(raw: str) -> str:
+    """Post-process stripped text to remove residual XBRL/filing noise."""
+    # Remove leftover XBRL namespace declarations and attributes that leak through
+    text = re.sub(r'xmlns(?::\w+)?="[^"]*"', "", raw)
+
+    # Collapse runs of whitespace on the same line (tabs, multiple spaces)
+    text = re.sub(r"[ \t]+", " ", text)
+
+    # Strip each line, drop empties, then collapse 3+ consecutive blank lines to 2
+    lines = [line.strip() for line in text.split("\n")]
+    text = "\n".join(line for line in lines if line)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # Remove lines that are just page numbers or section-divider noise
+    # e.g. "- 42 -", "Page 42", "F-12", "Table of Contents"  (repeated nav links)
+    text = re.sub(
+        r"^(?:[-–—\s]*\d+[-–—\s]*|Page\s+\d+|F-\d+|Table of Contents)$",
+        "",
+        text,
+        flags=re.MULTILINE | re.IGNORECASE,
+    )
+
+    # Remove lines that are only dashes/underscores (visual separators)
+    text = re.sub(r"^[_\-=]{3,}$", "", text, flags=re.MULTILINE)
+
+    # Final pass: collapse blank lines again after removals
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    return text.strip()
+
+
 def _fetch_filing_text(url: str, max_chars: int = 10000) -> str:
-    """Fetch filing document text, truncated to max_chars."""
+    """Fetch filing document text, strip XBRL/HTML noise, truncate to max_chars."""
     try:
         resp = requests.get(url, headers=HEADERS, timeout=30)
         resp.raise_for_status()
         text = resp.text
 
-        # Strip HTML tags for readability if it's HTML
+        # Strip HTML/XBRL tags for readability
         if "<html" in text.lower()[:500]:
-            from html.parser import HTMLParser
-            from io import StringIO
-
-            class _Stripper(HTMLParser):
-                def __init__(self):
-                    super().__init__()
-                    self.result = StringIO()
-                    self.skip = False
-
-                def handle_starttag(self, tag, attrs):
-                    if tag in ("script", "style"):
-                        self.skip = True
-
-                def handle_endtag(self, tag):
-                    if tag in ("script", "style"):
-                        self.skip = False
-
-                def handle_data(self, data):
-                    if not self.skip:
-                        self.result.write(data)
-
-            s = _Stripper()
+            s = _FilingStripper()
             s.feed(text)
             text = s.result.getvalue()
 
-        # Clean up excessive whitespace
-        lines = [line.strip() for line in text.split("\n")]
-        text = "\n".join(line for line in lines if line)
+        text = _clean_text(text)
 
         if len(text) > max_chars:
             text = text[:max_chars] + f"\n\n[TRUNCATED — full filing is {len(resp.text):,} characters]"
