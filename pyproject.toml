@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "findata-mcp"
-version = "0.3.0"
+version = "0.3.2"
 description = "Financial data MCP server — stocks, fundamentals, FRED economics, SEC filings, crypto via x402 micropayments"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Cortex Labs", email = "hello@findata-mcp.io" }]
+authors = [{ name = "Cortex Labs" }]
 keywords = [
   "mcp",
   "finance",
@@ -40,9 +40,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://findata-mcp.io"
+Homepage = "https://pypi.org/project/findata-mcp/"
 Repository = "https://github.com/sapph1re/findata-mcp"
-Documentation = "https://findata-mcp.io/docs"
+Documentation = "https://pypi.org/project/findata-mcp/"
 "Bug Tracker" = "https://github.com/sapph1re/findata-mcp/issues"
 
 [project.scripts]
