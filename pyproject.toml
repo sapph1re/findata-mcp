@@ -50,8 +50,7 @@ findata-mcp = "findata_mcp:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["findata_mcp"]
-# NO force-include — only findata_mcp/ package ships
-# tools/, app.py, cache.py, metering.py stay server-side (Railway)
+# Only the thin client ships. backend/ (app.py, tools/, etc.) is server-side only (Railway).
 
 [tool.hatch.build.targets.sdist]
 include = ["findata_mcp/", "README.md", "pyproject.toml"]

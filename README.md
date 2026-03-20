@@ -135,13 +135,31 @@ sec_filing(ticker_or_cik="AAPL", form_type="10-K")
 
 ## Architecture
 
+FinData MCP has two components: a **thin client** (what you install) and a **hosted backend** (what runs on Railway).
+
+### Thin Client (`findata_mcp/`) — shipped via PyPI
+
+The `pip install` / `uvx` package is a lightweight MCP stdio server that proxies requests to the hosted backend. It handles x402 micropayment signing automatically. No API keys, no local data providers needed.
+
 ```
-findata-mcp/
-├── server.py          # FastMCP server + 5 tool definitions
-├── app.py             # FastAPI HTTP server (x402 payments + API key auth)
-├── auth.py            # API key management + rate limiting (SQLite)
-├── metering.py        # Call logging + usage tracking
+findata_mcp/
+├── __init__.py        # Entry point (findata-mcp CLI)
+├── server.py          # FastMCP thin server (5 tool stubs)
+└── client.py          # HTTP client with x402 auto-payment
+```
+
+**Requires:** `EVM_PRIVATE_KEY` env var — a wallet funded with USDC on Base mainnet ($0.01/call).
+
+### Hosted Backend (`backend/`) — deployed on Railway
+
+The full implementation with data providers (Yahoo Finance, FRED, SEC EDGAR, CoinGecko), caching, metering, and x402 payment verification. Not included in the PyPI package.
+
+```
+backend/
+├── app.py             # FastAPI HTTP server (x402 payments + metering)
 ├── cache.py           # In-memory TTL cache
+├── metering.py        # Call logging + usage tracking
+├── server.py          # Legacy full local MCP server (not used in production)
 └── tools/
     ├── stock_quote.py
     ├── company_fundamentals.py
@@ -150,27 +168,28 @@ findata-mcp/
     └── crypto_price.py
 ```
 
-**Transports:**
-- **stdio** (`server.py`) — for Claude Desktop and MCP-native clients
-- **HTTP** (`app.py`) — for direct API access with x402 or API key auth
+**Live at:** `https://findata-mcp-production-1cd3.up.railway.app`
 
 ---
 
 ## Development
 
 ```bash
-git clone https://github.com/cortex-labs/findata-mcp
+git clone https://github.com/sapph1re/findata-mcp
 cd findata-mcp
-pip install -e ".[dev]"
 
-# Run stdio server
-python server.py
+# Install thin client in dev mode
+pip install -e .
 
-# Run HTTP server
-uvicorn app:app --host 0.0.0.0 --port 8080
+# Run thin client (connects to hosted backend)
+findata-mcp
+
+# Run backend locally
+pip install -r requirements.txt
+cd backend && uvicorn app:app --host 0.0.0.0 --port 8080
 
 # Run tests
-pytest tests/ -v
+python -m pytest test_thin_client.py -v
 ```
 
 ---
