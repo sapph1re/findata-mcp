@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "findata-mcp"
-version = "0.1.0"
-description = "Financial data MCP server — stocks, fundamentals, FRED economics, SEC filings, crypto"
+version = "0.3.0"
+description = "Financial data MCP server — stocks, fundamentals, FRED economics, SEC filings, crypto via x402 micropayments"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -34,12 +34,9 @@ classifiers = [
 ]
 dependencies = [
   "fastmcp>=3.0.0",
-  "yfinance>=0.2.36",
-  "fredapi>=0.5.2",
   "requests>=2.31.0",
-  "fastapi>=0.115.0",
-  "uvicorn>=0.34.0",
-  "httpx>=0.27.0",
+  "x402[evm]>=2.3.0",
+  "eth-account>=0.13.0",
 ]
 
 [project.urls]
@@ -53,22 +50,8 @@ findata-mcp = "findata_mcp:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["findata_mcp"]
-
-# Bundle all runtime source files into the package so `uvx findata-mcp` works
-[tool.hatch.build.targets.wheel.force-include]
-"server.py"   = "findata_mcp/server.py"
-"cache.py"    = "findata_mcp/cache.py"
-"metering.py" = "findata_mcp/metering.py"
-"tools"       = "findata_mcp/tools"
+# NO force-include — only findata_mcp/ package ships
+# tools/, app.py, cache.py, metering.py stay server-side (Railway)
 
 [tool.hatch.build.targets.sdist]
-include = [
-  "findata_mcp/",
-  "server.py",
-  "cache.py",
-  "metering.py",
-  "tools/",
-  "requirements.txt",
-  "README.md",
-  "pyproject.toml",
-]
+include = ["findata_mcp/", "README.md", "pyproject.toml"]
