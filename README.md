@@ -1,5 +1,7 @@
 # FinData MCP
 
+<!-- mcp-name: io.github.sapph1re/findata-mcp -->
+
 Financial data for AI agents. Five tools — stocks, fundamentals, economics, SEC filings, crypto — accessible from any MCP client. Pay $0.01 per call, no signup.
 
 ## Quick Start
