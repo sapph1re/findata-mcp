@@ -6,6 +6,8 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from findata_mcp.client import FinDataClient
 
 
@@ -73,6 +75,56 @@ class TestFinDataClientNoKey(unittest.TestCase):
             private_key="",
         )
         self.assertEqual(client.backend_url, "https://example.com")
+
+
+class TestFinDataClientErrorHandling(unittest.TestCase):
+    """Test error handling for connection errors and invalid keys."""
+
+    @patch("findata_mcp.client.requests.Session")
+    def test_connection_error_returns_dict(self, mock_session_cls):
+        """ConnectionError in call() returns error dict instead of raising."""
+        mock_session = MagicMock()
+        mock_session.get.side_effect = requests.ConnectionError("Connection refused")
+        client = FinDataClient(backend_url="https://example.com", private_key="")
+        client._session = mock_session
+
+        result = client.call("stock_quote", ticker="AAPL")
+
+        self.assertIn("error", result)
+        self.assertIn("Cannot reach backend", result["error"])
+
+    @patch("findata_mcp.client.requests.Session")
+    def test_invalid_private_key_returns_dict(self, mock_session_cls):
+        """Invalid private key during 402 handling returns error dict."""
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 402
+        mock_resp.headers = {"payment-required": "dGVzdA=="}
+        mock_session.get.return_value = mock_resp
+
+        client = FinDataClient(backend_url="https://example.com", private_key="0xdeadbeef")
+        client._session = mock_session
+
+        # Mock _get_x402_client to raise PaymentError (as it would with invalid key)
+        from findata_mcp.client import PaymentError
+        with patch.object(client, '_get_x402_client', side_effect=PaymentError("Invalid wallet key: bad key")):
+            result = client.call("stock_quote", ticker="AAPL")
+
+        self.assertIn("error", result)
+        self.assertIn("Invalid wallet key", result["error"])
+
+    @patch("findata_mcp.client.requests.Session")
+    def test_timeout_error_returns_dict(self, mock_session_cls):
+        """Timeout in call() returns error dict instead of raising."""
+        mock_session = MagicMock()
+        mock_session.get.side_effect = requests.Timeout("Request timed out")
+        client = FinDataClient(backend_url="https://example.com", private_key="")
+        client._session = mock_session
+
+        result = client.call("stock_quote", ticker="AAPL")
+
+        self.assertIn("error", result)
+        self.assertIn("Request failed", result["error"])
 
 
 class TestFinDataClientWithKey(unittest.TestCase):

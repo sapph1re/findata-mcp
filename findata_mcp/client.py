@@ -41,7 +41,11 @@ class FinDataClient:
         from x402.mechanisms.evm.exact.client import ExactEvmScheme
         from x402.mechanisms.evm.signers import EthAccountSigner
 
-        account = Account.from_key(self._private_key)
+        try:
+            account = Account.from_key(self._private_key)
+        except (ValueError, Exception) as e:
+            raise PaymentError(f"Invalid wallet key: {e}")
+
         signer = EthAccountSigner(account)
         scheme = ExactEvmScheme(signer=signer)
 
@@ -60,7 +64,12 @@ class FinDataClient:
         """Call a backend tool endpoint with automatic x402 payment."""
         url = f"{self.backend_url}/api/v1/{tool_name}"
 
-        resp = self._session.get(url, params=params, timeout=30)
+        try:
+            resp = self._session.get(url, params=params, timeout=30)
+        except requests.ConnectionError as e:
+            return {"error": f"Cannot reach backend: {e}"}
+        except requests.RequestException as e:
+            return {"error": f"Request failed: {e}"}
 
         if resp.status_code == 402:
             return self._handle_402(resp, url, params)
@@ -84,7 +93,10 @@ class FinDataClient:
                          "Each API call costs $0.01 USDC.",
             }
 
-        x402_client = self._get_x402_client()
+        try:
+            x402_client = self._get_x402_client()
+        except PaymentError as e:
+            return {"error": str(e)}
         if x402_client is None:
             return {"error": "Failed to initialize x402 payment client."}
 
@@ -115,12 +127,17 @@ class FinDataClient:
             return {"error": f"Failed to serialize payment: {e}"}
 
         # Retry with payment signature
-        retry_resp = self._session.get(
-            url,
-            params=params,
-            headers={PAYMENT_SIGNATURE_HEADER: payload_b64},
-            timeout=30,
-        )
+        try:
+            retry_resp = self._session.get(
+                url,
+                params=params,
+                headers={PAYMENT_SIGNATURE_HEADER: payload_b64},
+                timeout=30,
+            )
+        except requests.ConnectionError as e:
+            return {"error": f"Cannot reach backend: {e}"}
+        except requests.RequestException as e:
+            return {"error": f"Request failed: {e}"}
 
         if retry_resp.status_code == 402:
             return {
