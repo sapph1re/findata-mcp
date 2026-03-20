@@ -1,201 +1,176 @@
 # FinData MCP
 
-The first comprehensive financial data MCP server. Five tools covering real-time stocks, company fundamentals, US economic indicators (FRED), SEC filings, and cryptocurrency — all in one server.
+Financial data for AI agents. Five tools — stocks, fundamentals, economics, SEC filings, crypto — accessible from any MCP client. Pay $0.01 per call, no signup.
 
-Pay per call via x402 micropayments ($0.01/call) or register a free API key (1,000 calls/day). **No signup required to start.**
+## Quick Start
+
+**Install:**
+
+```bash
+pip install findata-mcp
+```
+
+**Set your wallet key** (any EVM wallet with USDC on Base):
+
+```bash
+export EVM_PRIVATE_KEY=your_private_key_here
+```
+
+**Add to Claude Desktop** — edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "findata-mcp": {
+      "command": "findata-mcp",
+      "env": {
+        "EVM_PRIVATE_KEY": "your_private_key_here"
+      }
+    }
+  }
+}
+```
+
+**Add to Cursor** — edit `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "findata-mcp": {
+      "command": "findata-mcp",
+      "env": {
+        "EVM_PRIVATE_KEY": "your_private_key_here"
+      }
+    }
+  }
+}
+```
+
+Restart your client. You now have five financial data tools available.
 
 ---
 
 ## Tools
 
-| Tool | Description | Cache |
-|------|-------------|-------|
-| `stock_quote(ticker)` | Real-time (15-min delayed) price, volume, and change % | 1 min |
-| `company_fundamentals(ticker)` | Revenue, P/E, market cap, sector, beta, dividend yield | 1 hr |
-| `economic_indicator(series_id)` | 800,000+ FRED series: GDP, CPI, fed funds rate, yield curves | 6 hr |
+| Tool | What it returns | Cache |
+|------|----------------|-------|
+| `stock_quote(ticker)` | Price, volume, change %, market cap | 1 min |
+| `company_fundamentals(ticker)` | Revenue, P/E, sector, beta, dividend yield, description | 1 hr |
+| `economic_indicator(series_id)` | 800,000+ FRED series (GDP, CPI, rates, yield curves) | 6 hr |
 | `sec_filing(ticker_or_cik, form_type)` | Full text of 10-K, 10-Q, 8-K from SEC EDGAR | 24 hr |
-| `crypto_price(coin_id)` | Price, market cap, 24h volume, 7-day sparkline via CoinGecko | 1 min |
+| `crypto_price(coin_id)` | Price, market cap, 24h volume, 7-day sparkline | 1 min |
 
 ---
 
-## Installation
+## Examples
 
-### Claude Desktop (Smithery)
+### Get a stock quote
 
-```bash
-smithery install findata-mcp
+```
+stock_quote(ticker="NVDA")
 ```
 
-### uvx (any MCP client)
-
-```bash
-uvx findata-mcp
-```
-
-### pip
-
-```bash
-pip install findata-mcp
-findata-mcp
-```
-
-### Docker
-
-```bash
-docker run -p 8080:8080 \
-  -e FINDATA_API_KEY=fd_live_your_key \
-  cortexlabs/findata-mcp
-```
-
----
-
-## Configuration
-
-All environment variables are optional. The server works out of the box via x402 micropayments.
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `FINDATA_API_KEY` | API key for rate-limited access | — |
-| `FRED_API_KEY` | FRED API key for higher rate limits | — |
-| `X402_WALLET_ADDRESS` | Wallet address to receive x402 payments | placeholder |
-| `X402_NETWORK` | Payment network (`eip155:84532` = Base Sepolia) | Base Sepolia |
-| `X402_VERIFY` | Verify x402 payments on-chain (`true`/`false`) | `false` |
-| `FINDATA_DB_PATH` | Path for API key SQLite database | `./findata.db` |
-
----
-
-## Pricing
-
-| Tier | Price | Limit |
-|------|-------|-------|
-| x402 pay-per-call | $0.01 / call | Unlimited |
-| Free API key | $0 | 1,000 calls/day |
-| Pro API key | $9/month | 10,000 calls/day |
-
-Register at [findata-mcp.io/keys](https://findata-mcp.io/keys).
-
----
-
-## Usage Examples
-
-### Stock quote
-
-```python
-# MCP tool call
-stock_quote(ticker="AAPL")
-
-# Returns:
+```json
 {
-  "ticker": "AAPL",
-  "price": 213.49,
-  "change": 1.23,
-  "change_pct": 0.58,
-  "volume": 54321000,
-  "market_cap": 3280000000000,
-  "currency": "USD",
-  "timestamp": "2026-03-01T15:30:00Z"
+  "ticker": "NVDA",
+  "price": 878.35,
+  "change": 12.40,
+  "change_pct": 1.43,
+  "volume": 41200000,
+  "market_cap": 2150000000000,
+  "currency": "USD"
 }
 ```
 
-### Economic indicator (FRED)
+### Look up company fundamentals
 
-```python
+```
+company_fundamentals(ticker="AAPL")
+```
+
+```json
+{
+  "ticker": "AAPL",
+  "name": "Apple Inc.",
+  "sector": "Technology",
+  "market_cap": 3280000000000,
+  "pe_ratio": 33.2,
+  "revenue": 383285000000,
+  "beta": 1.24,
+  "dividend_yield": 0.0044
+}
+```
+
+### Check an economic indicator
+
+```
 economic_indicator(series_id="FEDFUNDS")
+```
 
-# Returns:
+```json
 {
   "series_id": "FEDFUNDS",
   "title": "Federal Funds Effective Rate",
   "units": "Percent",
   "frequency": "Monthly",
   "latest_value": 4.33,
-  "latest_date": "2026-02-01",
-  "observations": [...]
+  "latest_date": "2026-02-01"
 }
 ```
 
-### SEC filing
+Common FRED series: `GDP`, `CPIAUCSL` (inflation), `UNRATE` (unemployment), `DGS10` (10-year Treasury), `FEDFUNDS`.
 
-```python
-sec_filing(ticker_or_cik="AAPL", form_type="10-K")
+---
 
-# Returns:
-{
-  "ticker": "AAPL",
-  "cik": "320193",
-  "form_type": "10-K",
-  "filed_at": "2025-10-31",
-  "period": "2025-09-27",
-  "filing_url": "https://www.sec.gov/...",
-  "text_excerpt": "..."
-}
+## Pricing
+
+**$0.01 per call.** No signup, no API keys, no monthly fees.
+
+Payment happens automatically via [x402](https://www.x402.org/) — an open micropayment protocol. Your MCP client signs a USDC transfer on Base mainnet for each call. You need:
+
+1. An EVM wallet private key (set as `EVM_PRIVATE_KEY`)
+2. A small USDC balance on Base mainnet (~$1 covers 100 calls)
+
+That's it. No accounts, no rate limits, no billing pages.
+
+---
+
+## How It Works
+
+The `pip install` package is a thin MCP stdio server. It proxies your tool calls to a hosted backend, automatically handling x402 payment signing. Data comes from Yahoo Finance, FRED, SEC EDGAR, and CoinGecko.
+
+```
+Your AI agent  →  findata-mcp (local stdio)  →  Backend (Railway)  →  Data providers
+                  signs x402 payment              verifies payment
 ```
 
 ---
 
-## Architecture
+## Configuration
 
-FinData MCP has two components: a **thin client** (what you install) and a **hosted backend** (what runs on Railway).
-
-### Thin Client (`findata_mcp/`) — shipped via PyPI
-
-The `pip install` / `uvx` package is a lightweight MCP stdio server that proxies requests to the hosted backend. It handles x402 micropayment signing automatically. No API keys, no local data providers needed.
-
-```
-findata_mcp/
-├── __init__.py        # Entry point (findata-mcp CLI)
-├── server.py          # FastMCP thin server (5 tool stubs)
-└── client.py          # HTTP client with x402 auto-payment
-```
-
-**Requires:** `EVM_PRIVATE_KEY` env var — a wallet funded with USDC on Base mainnet ($0.01/call).
-
-### Hosted Backend (`backend/`) — deployed on Railway
-
-The full implementation with data providers (Yahoo Finance, FRED, SEC EDGAR, CoinGecko), caching, metering, and x402 payment verification. Not included in the PyPI package.
-
-```
-backend/
-├── app.py             # FastAPI HTTP server (x402 payments + metering)
-├── cache.py           # In-memory TTL cache
-├── metering.py        # Call logging + usage tracking
-├── server.py          # Legacy full local MCP server (not used in production)
-└── tools/
-    ├── stock_quote.py
-    ├── company_fundamentals.py
-    ├── economic_indicator.py
-    ├── sec_filing.py
-    └── crypto_price.py
-```
-
-**Live at:** `https://findata-mcp-production-1cd3.up.railway.app`
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `EVM_PRIVATE_KEY` | Yes | — | Wallet private key with USDC on Base |
+| `FINDATA_BACKEND_URL` | No | Production URL | Override for self-hosted backend |
 
 ---
 
-## Development
+## Alternative Install Methods
+
+**uvx** (no install needed):
 
 ```bash
-git clone https://github.com/sapph1re/findata-mcp
-cd findata-mcp
+uvx findata-mcp
+```
 
-# Install thin client in dev mode
-pip install -e .
+**Smithery** (Claude Desktop):
 
-# Run thin client (connects to hosted backend)
-findata-mcp
-
-# Run backend locally
-pip install -r requirements.txt
-cd backend && uvicorn app:app --host 0.0.0.0 --port 8080
-
-# Run tests
-python -m pytest test_thin_client.py -v
+```bash
+smithery install findata-mcp
 ```
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
-
-Built by [Cortex Labs](https://findata-mcp.io)
+MIT
