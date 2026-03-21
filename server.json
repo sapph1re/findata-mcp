@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.sapph1re/findata-mcp",
+  "title": "FinData MCP",
+  "description": "Five-tool financial data MCP: stocks, fundamentals, FRED, SEC filings, crypto. $0.01/call via x402.",
+  "repository": {
+    "url": "https://github.com/sapph1re/findata-mcp",
+    "source": "github"
+  },
+  "version": "0.3.2",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "findata-mcp",
+      "version": "0.3.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "EVM wallet private key for x402 micropayment signing (any wallet with USDC on Base mainnet)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true,
+          "name": "EVM_PRIVATE_KEY"
+        }
+      ]
+    }
+  ]
+}
