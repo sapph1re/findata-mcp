@@ -204,5 +204,201 @@ class TestMCPServerToolDefinitions(unittest.TestCase):
         self.assertEqual(mcp.version, "0.3.0")
 
 
+class TestParamAliases(unittest.TestCase):
+    """Verify MCP tools accept common parameter aliases (Task 196)."""
+
+    @patch("findata_mcp.client.requests.Session")
+    def test_stock_quote_symbol_alias(self, mock_session_cls):
+        """stock_quote(symbol='AAPL') works like stock_quote(ticker='AAPL')."""
+        from findata_mcp.server import stock_quote, _get_client
+
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ticker": "AAPL", "price": 150.0}
+        mock_session.get.return_value = mock_resp
+
+        client = FinDataClient(backend_url="https://example.com", private_key="")
+        client._session = mock_session
+
+        with patch("findata_mcp.server._get_client", return_value=client):
+            result = stock_quote(symbol="AAPL")
+
+        self.assertEqual(result["ticker"], "AAPL")
+        mock_session.get.assert_called_once_with(
+            "https://example.com/api/v1/stock_quote",
+            params={"ticker": "AAPL"},
+            timeout=30,
+        )
+
+    @patch("findata_mcp.client.requests.Session")
+    def test_company_fundamentals_symbol_alias(self, mock_session_cls):
+        """company_fundamentals(symbol='MSFT') works."""
+        from findata_mcp.server import company_fundamentals
+
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ticker": "MSFT", "pe_ratio": 30.0}
+        mock_session.get.return_value = mock_resp
+
+        client = FinDataClient(backend_url="https://example.com", private_key="")
+        client._session = mock_session
+
+        with patch("findata_mcp.server._get_client", return_value=client):
+            result = company_fundamentals(symbol="MSFT")
+
+        self.assertEqual(result["ticker"], "MSFT")
+
+    @patch("findata_mcp.client.requests.Session")
+    def test_crypto_price_symbol_alias(self, mock_session_cls):
+        """crypto_price(symbol='bitcoin') works like crypto_price(coin_id='bitcoin')."""
+        from findata_mcp.server import crypto_price
+
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"id": "bitcoin", "price": 65000}
+        mock_session.get.return_value = mock_resp
+
+        client = FinDataClient(backend_url="https://example.com", private_key="")
+        client._session = mock_session
+
+        with patch("findata_mcp.server._get_client", return_value=client):
+            result = crypto_price(symbol="bitcoin")
+
+        self.assertEqual(result["id"], "bitcoin")
+        mock_session.get.assert_called_once_with(
+            "https://example.com/api/v1/crypto_price",
+            params={"coin_id": "bitcoin"},
+            timeout=30,
+        )
+
+    @patch("findata_mcp.client.requests.Session")
+    def test_crypto_price_coin_alias(self, mock_session_cls):
+        """crypto_price(coin='ethereum') works."""
+        from findata_mcp.server import crypto_price
+
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"id": "ethereum", "price": 3500}
+        mock_session.get.return_value = mock_resp
+
+        client = FinDataClient(backend_url="https://example.com", private_key="")
+        client._session = mock_session
+
+        with patch("findata_mcp.server._get_client", return_value=client):
+            result = crypto_price(coin="ethereum")
+
+        self.assertEqual(result["id"], "ethereum")
+
+    @patch("findata_mcp.client.requests.Session")
+    def test_economic_indicator_alias(self, mock_session_cls):
+        """economic_indicator(indicator='GDP') works like economic_indicator(series_id='GDP')."""
+        from findata_mcp.server import economic_indicator
+
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"series_id": "GDP", "value": 28000}
+        mock_session.get.return_value = mock_resp
+
+        client = FinDataClient(backend_url="https://example.com", private_key="")
+        client._session = mock_session
+
+        with patch("findata_mcp.server._get_client", return_value=client):
+            result = economic_indicator(indicator="GDP")
+
+        self.assertEqual(result["series_id"], "GDP")
+        mock_session.get.assert_called_once_with(
+            "https://example.com/api/v1/economic_indicator",
+            params={"series_id": "GDP"},
+            timeout=30,
+        )
+
+    @patch("findata_mcp.client.requests.Session")
+    def test_sec_filing_symbol_alias(self, mock_session_cls):
+        """sec_filing(symbol='AAPL') works like sec_filing(ticker_or_cik='AAPL')."""
+        from findata_mcp.server import sec_filing
+
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ticker": "AAPL", "form": "10-K"}
+        mock_session.get.return_value = mock_resp
+
+        client = FinDataClient(backend_url="https://example.com", private_key="")
+        client._session = mock_session
+
+        with patch("findata_mcp.server._get_client", return_value=client):
+            result = sec_filing(symbol="AAPL")
+
+        self.assertEqual(result["ticker"], "AAPL")
+
+    @patch("findata_mcp.client.requests.Session")
+    def test_sec_filing_ticker_alias(self, mock_session_cls):
+        """sec_filing(ticker='AAPL') works."""
+        from findata_mcp.server import sec_filing
+
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ticker": "AAPL", "form": "10-Q"}
+        mock_session.get.return_value = mock_resp
+
+        client = FinDataClient(backend_url="https://example.com", private_key="")
+        client._session = mock_session
+
+        with patch("findata_mcp.server._get_client", return_value=client):
+            result = sec_filing(ticker="AAPL", form_type="10-Q")
+
+        self.assertEqual(result["ticker"], "AAPL")
+
+    def test_stock_quote_missing_param(self):
+        """stock_quote with no params returns helpful error."""
+        from findata_mcp.server import stock_quote
+        result = stock_quote()
+        self.assertIn("error", result)
+        self.assertIn("ticker", result["error"])
+
+    def test_crypto_price_missing_param(self):
+        """crypto_price with no params returns helpful error."""
+        from findata_mcp.server import crypto_price
+        result = crypto_price()
+        self.assertIn("error", result)
+        self.assertIn("coin_id", result["error"])
+
+    def test_economic_indicator_missing_param(self):
+        """economic_indicator with no params returns helpful error."""
+        from findata_mcp.server import economic_indicator
+        result = economic_indicator()
+        self.assertIn("error", result)
+        self.assertIn("series_id", result["error"])
+
+    def test_canonical_param_takes_precedence(self):
+        """When both ticker and symbol are provided, ticker wins."""
+        from findata_mcp.server import stock_quote
+
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ticker": "AAPL", "price": 150}
+        mock_session.get.return_value = mock_resp
+
+        client = FinDataClient(backend_url="https://example.com", private_key="")
+        client._session = mock_session
+
+        with patch("findata_mcp.server._get_client", return_value=client):
+            result = stock_quote(ticker="AAPL", symbol="MSFT")
+
+        # ticker takes precedence
+        mock_session.get.assert_called_once_with(
+            "https://example.com/api/v1/stock_quote",
+            params={"ticker": "AAPL"},
+            timeout=30,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
