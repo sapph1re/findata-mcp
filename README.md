@@ -4,6 +4,8 @@
 
 Financial data for AI agents. Five tools — stocks, fundamentals, economics, SEC filings, crypto — accessible from any MCP client. Pay $0.01 per call, no signup.
 
+[![FinData MCP server](https://glama.ai/mcp/servers/sapph1re/findata-mcp/badges/card.svg)](https://glama.ai/mcp/servers/sapph1re/findata-mcp)
+
 ## Quick Start
 
 **Install:**
