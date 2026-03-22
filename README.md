@@ -165,13 +165,13 @@ Your AI agent  →  findata-mcp (local stdio)  →  Backend (Railway)  →  Data
 uvx findata-mcp
 ```
 
-**Smithery** (Claude Desktop):
-
-```bash
-smithery install findata-mcp
-```
-
 ---
+
+## Distribution Status
+
+- PyPI: live
+- Glama: submission in progress
+- Smithery: not supported yet (current package uses stdio transport; Smithery support will require an HTTP MCP endpoint or a compatible submission path)
 
 ## License
 
