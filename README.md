@@ -1,5 +1,7 @@
 # FinData MCP
 
+> Real-time financial data for AI agents. Stock quotes, company fundamentals, 800,000+ FRED economic indicators, SEC filings, and crypto prices. Pay-per-call ($0.01) via x402 micropayments on Base — no signup or API keys needed.
+
 <!-- mcp-name: io.github.sapph1re/findata-mcp -->
 
 Financial data for AI agents. Five tools — stocks, fundamentals, economics, SEC filings, crypto — accessible from any MCP client. Pay $0.01 per call, no signup.
@@ -169,9 +171,12 @@ uvx findata-mcp
 
 ## Distribution Status
 
+- PyPI: [findata-mcp](https://pypi.org/project/findata-mcp/)
+- Glama: [live](https://glama.ai/mcp/servers/sapph1re/findata-mcp)
+- mcp.so: [live](https://mcp.so/server/findata-mcp/sapph1re)
+- Official MCP Registry: pending review
+
 - PyPI: live
-- Glama: submission in progress
-- Smithery: not supported yet (current package uses stdio transport; Smithery support will require an HTTP MCP endpoint or a compatible submission path)
 
 ## License
 
