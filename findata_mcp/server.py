@@ -9,7 +9,7 @@ from findata_mcp.client import FinDataClient
 
 mcp = FastMCP(
     name="findata-mcp",
-    version="0.3.0",
+    version="0.3.3",
     instructions=(
         "Financial data via hosted backend. 5 tools: stock_quote, company_fundamentals, "
         "economic_indicator, sec_filing, crypto_price. Requires EVM_PRIVATE_KEY for x402 "

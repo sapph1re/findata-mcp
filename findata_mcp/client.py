@@ -26,7 +26,7 @@ class FinDataClient:
         self._private_key = private_key
         self._x402_client = None  # lazy init
         self._session = requests.Session()
-        self._session.headers["User-Agent"] = "findata-mcp-client/0.3.0"
+        self._session.headers["User-Agent"] = "findata-mcp-client/0.3.3"
 
     def _get_x402_client(self):
         """Lazily initialize x402 client with EVM signer."""

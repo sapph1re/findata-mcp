@@ -19,7 +19,7 @@ startCommand:
 
 # ── Metadata ─────────────────────────────────────────────────────────────────
 name: findata-mcp
-version: "0.2.0"
+version: "0.3.3"
 description: |
   The first comprehensive financial data MCP. Five tools covering real-time
   stocks, company fundamentals, economic indicators, SEC filings, and crypto —
@@ -27,7 +27,7 @@ description: |
   No signup required.
 
 author: Cortex
-homepage: https://findata-mcp.io
+homepage: https://pypi.org/project/findata-mcp/
 repository: https://github.com/sapph1re/findata-mcp
 license: MIT
 category: Finance
@@ -48,6 +48,19 @@ tools:
     description: |
       Real-time (15-min delayed) stock price, volume, and change percentage.
       Covers all NYSE, NASDAQ, and major global exchanges via yfinance.
+      Also available as /stock_price and /api/v1/stock_price (aliases).
+    inputSchema:
+      type: object
+      properties:
+        ticker:
+          type: string
+          description: Stock ticker symbol (e.g. AAPL, TSLA, MSFT)
+      required: [ticker]
+
+  - name: stock_price
+    description: |
+      Alias for stock_quote. Real-time (15-min delayed) stock price, volume,
+      and change percentage.
     inputSchema:
       type: object
       properties:

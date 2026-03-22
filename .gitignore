@@ -10,3 +10,5 @@ findata.db
 *.sqlite3
 .venv/
 venv/
+.mcpregistry_github_token
+.mcpregistry_registry_token
