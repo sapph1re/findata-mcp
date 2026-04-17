@@ -1,5 +1,6 @@
 """FinData MCP — Thin client that proxies to hosted backend with x402 auto-payment."""
 
+import logging
 import os
 from typing import Any
 
@@ -7,9 +8,24 @@ from fastmcp import FastMCP
 
 from findata_mcp.client import FinDataClient
 
+
+class _SuppressValidationTracebacks(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.exc_info and record.exc_info[0] is not None:
+            from pydantic import ValidationError as PydanticValidationError
+            if issubclass(record.exc_info[0], (PydanticValidationError,)):
+                record.exc_info = None
+                record.exc_text = None
+        return True
+
+
+_vf = _SuppressValidationTracebacks()
+for _h in logging.getLogger("fastmcp").handlers:
+    _h.addFilter(_vf)
+
 mcp = FastMCP(
     name="findata-mcp",
-    version="0.3.3",
+    version="0.3.5",
     instructions=(
         "Financial data via hosted backend. 5 tools: stock_quote, company_fundamentals, "
         "economic_indicator, sec_filing, crypto_price. Requires EVM_PRIVATE_KEY for x402 "
