@@ -61,7 +61,7 @@ Restart your client. You now have five financial data tools available.
 | `stock_quote(ticker)` | Price, volume, change %, market cap | 1 min |
 | `company_fundamentals(ticker)` | Revenue, P/E, sector, beta, dividend yield, description | 1 hr |
 | `economic_indicator(series_id)` | 800,000+ FRED series (GDP, CPI, rates, yield curves) | 6 hr |
-| `sec_filing(ticker_or_cik, form_type)` | Full text of 10-K, 10-Q, 8-K from SEC EDGAR | 24 hr |
+| `sec_filing(ticker, form_type)` | Full text of 10-K, 10-Q, 8-K from SEC EDGAR | 24 hr |
 | `crypto_price(coin_id)` | Price, market cap, 24h volume, 7-day sparkline | 1 min |
 
 ---
@@ -123,6 +123,24 @@ economic_indicator(series_id="FEDFUNDS")
 ```
 
 Common FRED series: `GDP`, `CPIAUCSL` (inflation), `UNRATE` (unemployment), `DGS10` (10-year Treasury), `FEDFUNDS`.
+
+### Read an SEC filing
+
+```
+sec_filing(ticker="AAPL", form_type="10-K")
+```
+
+```json
+{
+  "ticker_or_cik": "AAPL",
+  "form_type": "10-K",
+  "filing_date": "2025-11-01",
+  "document_url": "https://www.sec.gov/Archives/...",
+  "content": "UNITED STATES SECURITIES AND EXCHANGE COMMISSION..."
+}
+```
+
+Also accepts `ticker_or_cik` (legacy) or `symbol` as aliases for `ticker`.
 
 ---
 

@@ -19,7 +19,7 @@ startCommand:
 
 # ── Metadata ─────────────────────────────────────────────────────────────────
 name: findata-mcp
-version: "0.3.3"
+version: "0.3.5"
 description: |
   The first comprehensive financial data MCP. Five tools covering real-time
   stocks, company fundamentals, economic indicators, SEC filings, and crypto —
@@ -106,11 +106,16 @@ tools:
         ticker_or_cik:
           type: string
           description: Stock ticker (AAPL) or SEC CIK number (320193)
+        ticker:
+          type: string
+          description: Alias for ticker_or_cik — use either one
+        symbol:
+          type: string
+          description: Alias for ticker_or_cik
         form_type:
           type: string
           description: SEC form type (10-K, 10-Q, 8-K, DEF 14A, S-1, etc.)
           default: "10-K"
-      required: [ticker_or_cik]
 
   - name: crypto_price
     description: |
