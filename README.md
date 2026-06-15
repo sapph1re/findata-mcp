@@ -1,5 +1,7 @@
 # FinData MCP
 
+[![MCP.Directory](https://img.shields.io/badge/MCP.Directory-listed-blue)](https://mcp.directory/servers?q=findata-mcp)
+
 > Real-time financial data for AI agents. Stock quotes, company fundamentals, 800,000+ FRED economic indicators, SEC filings, and crypto prices. Pay-per-call ($0.01) via x402 micropayments on Base — no signup or API keys needed.
 
 <!-- mcp-name: io.github.sapph1re/findata-mcp -->
