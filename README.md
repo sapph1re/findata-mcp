@@ -192,11 +192,9 @@ uvx findata-mcp
 ## Distribution Status
 
 - PyPI: [findata-mcp](https://pypi.org/project/findata-mcp/)
+- Smithery: [live](https://smithery.ai/servers/dev-romanv/findata-mcp)
 - Glama: [live](https://glama.ai/mcp/servers/sapph1re/findata-mcp)
 - mcp.so: [live](https://mcp.so/server/findata-mcp/sapph1re)
-- Official MCP Registry: pending review
-
-- PyPI: live
 
 ## License
 
