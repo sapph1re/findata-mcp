@@ -21,10 +21,14 @@ startCommand:
 name: findata-mcp
 version: "0.3.5"
 description: |
-  The first comprehensive financial data MCP. Five tools covering real-time
-  stocks, company fundamentals, economic indicators, SEC filings, and crypto —
-  all in one server. Pay per call via x402 micropayments ($0.01/call).
-  No signup required.
+  Real-time financial data MCP for AI agents. Five tools: stock prices (NYSE,
+  NASDAQ, 50,000+ tickers), equity fundamentals (P/E ratio, revenue, earnings,
+  market cap, beta, dividend yield), 800,000+ FRED macroeconomic series (GDP,
+  CPI, inflation, interest rates, fed funds rate, Treasury yields,
+  unemployment), SEC EDGAR filings (10-K annual reports, 10-Q, 8-K from any
+  public company), and cryptocurrency prices (Bitcoin, Ethereum, 8,000+ coins).
+  Free trial: 50 calls/day. Pay-per-use: $0.01/call via x402 — no signup,
+  no API key required.
 
 author: Cortex
 homepage: https://pypi.org/project/findata-mcp/
@@ -35,32 +39,62 @@ category: Finance
 keywords:
   - finance
   - stocks
+  - stock-market
+  - stock-price
+  - market-data
+  - real-time
   - financial-data
+  - equity
+  - fundamentals
+  - earnings
+  - market-cap
+  - pe-ratio
   - economics
+  - macroeconomic
+  - gdp
+  - cpi
+  - inflation
+  - interest-rates
+  - treasury
+  - fred
+  - federal-reserve
   - sec-filings
+  - edgar
+  - annual-report
+  - 10-k
+  - 10-q
+  - 8-k
   - crypto
+  - cryptocurrency
+  - bitcoin
+  - ethereum
+  - coingecko
+  - yfinance
   - x402
   - micropayments
+  - ai-agent
+  - mcp
 
 # ── Tools ────────────────────────────────────────────────────────────────────
 tools:
   - name: stock_quote
     description: |
-      Real-time (15-min delayed) stock price, volume, and change percentage.
-      Covers all NYSE, NASDAQ, and major global exchanges via yfinance.
-      Also available as /stock_price and /api/v1/stock_price (aliases).
+      Real-time stock price, volume, and change percentage for any publicly
+      traded equity. Covers NYSE, NASDAQ, and 50+ global exchanges via
+      yfinance. Returns current price, open, high, low, volume, market cap,
+      and daily change. 15-min delayed. Alias: stock_price.
     inputSchema:
       type: object
       properties:
         ticker:
           type: string
-          description: Stock ticker symbol (e.g. AAPL, TSLA, MSFT)
+          description: Stock ticker symbol (e.g. AAPL, TSLA, MSFT, NVDA, SPY)
       required: [ticker]
 
   - name: stock_price
     description: |
       Alias for stock_quote. Real-time (15-min delayed) stock price, volume,
-      and change percentage.
+      market cap, and change percentage for any NYSE or NASDAQ ticker.
     inputSchema:
       type: object
       properties:
@@ -71,41 +105,48 @@ tools:
 
   - name: company_fundamentals
     description: |
-      Full fundamental data: revenue, earnings, P/E ratio, market cap, sector,
-      beta, dividend yield, and company description. Cached 1hr.
+      Full equity fundamental data for any public company: revenue, net income,
+      earnings per share (EPS), P/E ratio, price-to-book, market cap, sector,
+      industry, beta, dividend yield, payout ratio, and company description.
+      Data from Yahoo Finance. Cached 1hr.
     inputSchema:
       type: object
       properties:
         ticker:
           type: string
-          description: Stock ticker symbol
+          description: Stock ticker symbol (e.g. AAPL, MSFT, GOOGL)
       required: [ticker]
 
   - name: economic_indicator
     description: |
-      US macroeconomic data from the Federal Reserve (FRED): GDP, CPI,
-      unemployment rate, fed funds rate, yield curves, and 800,000+ series.
-      120 requests/minute limit. Cached 6hr.
+      US macroeconomic data from the Federal Reserve Economic Data (FRED)
+      database: GDP, CPI (inflation), unemployment rate, federal funds rate,
+      Treasury yields (2yr, 10yr, 30yr), yield curve spread, M2 money supply,
+      housing starts, retail sales, and 800,000+ other series. Cached 6hr.
     inputSchema:
       type: object
       properties:
         series_id:
           type: string
           description: |
-            FRED series ID. Examples: GDP, CPIAUCSL, UNRATE, FEDFUNDS,
-            DGS10 (10yr Treasury), T10Y2Y (yield curve spread)
+            FRED series ID. Common examples: GDP (gross domestic product),
+            CPIAUCSL (CPI inflation), UNRATE (unemployment), FEDFUNDS
+            (fed funds rate), DGS10 (10yr Treasury yield), T10Y2Y (yield
+            curve spread), M2SL (M2 money supply)
       required: [series_id]
 
   - name: sec_filing
     description: |
-      Full text of SEC filings from EDGAR: 10-K (annual), 10-Q (quarterly),
-      8-K (material events), and more. Free, no API key needed. Cached 24hr.
+      Full text of SEC filings from EDGAR for any US public company: 10-K
+      (annual report), 10-Q (quarterly report), 8-K (material events/earnings),
+      DEF 14A (proxy statement), S-1 (IPO prospectus), and more. Free, no API
+      key. Accepts ticker symbol or CIK number. Cached 24hr.
     inputSchema:
       type: object
       properties:
         ticker_or_cik:
           type: string
-          description: Stock ticker (AAPL) or SEC CIK number (320193)
+          description: Stock ticker (e.g. AAPL) or SEC CIK number (e.g. 320193)
         ticker:
           type: string
           description: Alias for ticker_or_cik — use either one
@@ -119,16 +160,18 @@ tools:
 
   - name: crypto_price
     description: |
-      Cryptocurrency price, market cap, 24h volume, and 7-day sparkline
-      via CoinGecko. 30 req/min free. Cached 1min.
+      Cryptocurrency market data via CoinGecko: current price in USD, market
+      cap, 24h trading volume, 24h price change, and 7-day price sparkline.
+      Supports 8,000+ coins including Bitcoin (BTC), Ethereum (ETH), Solana
+      (SOL), and all major DeFi tokens. Cached 1min.
     inputSchema:
       type: object
       properties:
         coin_id:
           type: string
           description: |
-            CoinGecko coin ID. Examples: bitcoin, ethereum, solana,
-            chainlink, uniswap. Use lowercase-hyphenated names.
+            CoinGecko coin ID (lowercase-hyphenated). Examples: bitcoin,
+            ethereum, solana, chainlink, uniswap, avalanche-2, matic-network
       required: [coin_id]
 
 # ── Pricing ──────────────────────────────────────────────────────────────────

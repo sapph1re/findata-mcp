@@ -2,11 +2,11 @@
 
 [![MCP.Directory](https://img.shields.io/badge/MCP.Directory-listed-blue)](https://mcp.directory/servers?q=findata-mcp)
 
-> Real-time financial data for AI agents. Stock quotes, company fundamentals, 800,000+ FRED economic indicators, SEC filings, and crypto prices. Pay-per-call ($0.01) via x402 micropayments on Base — no signup or API keys needed.
+> Stock market data, company fundamentals, FRED macroeconomic indicators, SEC EDGAR filings, and cryptocurrency prices for AI agents — all in one MCP server. Free trial: 50 calls/day. Pay-per-use: $0.01/call via x402 micropayments on Base. No signup, no API key.
 
 <!-- mcp-name: io.github.sapph1re/findata-mcp -->
 
-Financial data for AI agents. Five tools — stocks, fundamentals, economics, SEC filings, crypto — accessible from any MCP client. Pay $0.01 per call, no signup.
+Financial data for AI agents. Five tools covering real-time stock prices (NYSE, NASDAQ, 50,000+ tickers), equity fundamentals (P/E ratio, earnings, market cap), 800,000+ FRED economic series (GDP, CPI, inflation, interest rates, Treasury yields), SEC EDGAR filings (10-K annual reports, 10-Q, 8-K), and crypto prices (Bitcoin, Ethereum, 8,000+ coins). Works with Claude Desktop, Cursor, Windsurf, and any MCP client.
 
 ## Quick Start
 

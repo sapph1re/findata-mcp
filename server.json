@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.sapph1re/findata-mcp",
-  "title": "FinData MCP",
-  "description": "Five-tool financial data MCP: stocks, fundamentals, FRED, SEC filings, crypto. $0.01/call via x402.",
+  "title": "FinData MCP — Stock Market, FRED & SEC Data for AI Agents",
+  "description": "Real-time stock prices (NYSE/NASDAQ/global), equity fundamentals (P/E, revenue, earnings, market cap), 800,000+ FRED macroeconomic series (GDP, CPI, inflation, interest rates, Treasury yields), SEC EDGAR filings (10-K, 10-Q, 8-K), and cryptocurrency prices (Bitcoin, Ethereum, 8,000+ coins). Free: 50 calls/day. Paid: $0.01/call via x402 — no signup required.",
   "repository": {
     "url": "https://github.com/sapph1re/findata-mcp",
     "source": "github"
